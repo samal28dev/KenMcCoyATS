@@ -6,11 +6,12 @@ import Position from '@/models/Position'
  * GET /api/careers/[id] — public endpoint (no auth required)
  * Returns a single position's details for the public careers detail page.
  */
-export async function GET(_request: Request, { params }: { params: { id: string } }) {
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
         await dbConnect()
+        const { id } = await params
 
-        const position = await Position.findById(params.id)
+        const position = await Position.findById(id)
             .populate('clientId', 'companyName address.city address.state locationType')
             .select('title description requirements status createdAt clientId')
             .lean() as any
