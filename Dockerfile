@@ -16,6 +16,9 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED 1
 
+# Ensure public dir exists (Next.js standalone expects it)
+RUN mkdir -p public
+
 RUN npm run build
 
 # Production image
@@ -37,10 +40,6 @@ RUN chown nodejs:nodejs .next
 # Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nodejs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nodejs:nodejs /app/.next/static ./.next/static
-
-# Copy custom server (Socket.IO + cron) over the default standalone server
-COPY --from=builder --chown=nodejs:nodejs /app/server.js ./server.js
-COPY --from=builder --chown=nodejs:nodejs /app/src/lib/socket.ts ./src/lib/socket.ts
 
 USER nodejs
 
