@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Mail, Phone, MapPin, Briefcase, Calendar, FileText, Lock, Unlock, Plus, ChevronRight, User } from 'lucide-react'
+import { ArrowLeft, Mail, Phone, MapPin, Briefcase, Calendar, FileText, Lock, Unlock, Plus, ChevronRight, User, Pencil, Check, X } from 'lucide-react'
 import Link from 'next/link'
 import { use, useState } from 'react'
 import { AppShell } from '@/components/layout/app-shell'
@@ -30,11 +30,21 @@ function getStageStyle(status: string) {
     return PIPELINE_STAGES.find(s => s.value === status)?.color || 'bg-gray-100 text-gray-700'
 }
 
+function niceFilename(raw: string) {
+    if (!raw) return raw
+    const cleaned = raw.replace(/^(?:jd|resume)_\d+_[a-f0-9]+_/i, '')
+    return cleaned.replace(/_/g, ' ')
+}
+
 export default function CandidateDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
     const [emailOpen, setEmailOpen] = useState(false)
     const [assignOpen, setAssignOpen] = useState(false)
     const [selectedPositionId, setSelectedPositionId] = useState('')
+    const [editingContact, setEditingContact] = useState(false)
+    const [editContact, setEditContact] = useState({ email: '', phone: '', countryCode: '', location: '', currentCompany: '' })
+    const [editingProfessional, setEditingProfessional] = useState(false)
+    const [editProfessional, setEditProfessional] = useState({ experience: '', ctc: '', noticePeriod: '', designation: '', skills: '' })
     const queryClient = useQueryClient()
     const { user: currentUser } = useAuth()
     const isAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'operations_head'
@@ -118,6 +128,29 @@ export default function CandidateDetailPage({ params }: { params: Promise<{ id: 
         onSuccess: (_, lock) => {
             toast.success(lock ? 'Candidate locked' : 'Candidate unlocked')
             queryClient.invalidateQueries({ queryKey: ['candidate', id] })
+        },
+        onError: (err: any) => toast.error(err.message),
+    })
+
+    // Update candidate fields
+    const updateFieldMutation = useMutation({
+        mutationFn: async (updates: Record<string, any>) => {
+            const res = await apiFetch(`/api/candidates/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.message || 'Failed to update')
+            }
+            return res.json()
+        },
+        onSuccess: () => {
+            toast.success('Candidate updated!')
+            queryClient.invalidateQueries({ queryKey: ['candidate', id] })
+            setEditingContact(false)
+            setEditingProfessional(false)
         },
         onError: (err: any) => toast.error(err.message),
     })
@@ -219,47 +252,180 @@ export default function CandidateDetailPage({ params }: { params: Promise<{ id: 
                     <div className="lg:col-span-2 space-y-6">
                         {/* Contact */}
                         <div className="rounded-xl border border-border bg-card p-5">
-                            <h2 className="text-sm font-semibold mb-4">Contact Info</h2>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                <a href={`mailto:${candidate.email}`} className="flex items-center gap-2 text-primary hover:underline">
-                                    <Mail className="h-3.5 w-3.5" /> {candidate.email}
-                                </a>
-                                {candidate.phone && (
-                                    <a href={`tel:${candidate.countryCode || '+91'}${candidate.phone}`} className="flex items-center gap-2 text-primary hover:underline">
-                                        <Phone className="h-3.5 w-3.5" /> {candidate.countryCode || '+91'} {candidate.phone}
-                                    </a>
-                                )}
-                                {candidate.location && (
-                                    <div className="flex items-center gap-2 text-muted-foreground">
-                                        <MapPin className="h-3.5 w-3.5" /> {candidate.location}
-                                    </div>
-                                )}
-                                {candidate.currentCompany && (
-                                    <div className="flex items-center gap-2 text-muted-foreground">
-                                        <Briefcase className="h-3.5 w-3.5" /> {candidate.currentCompany}
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-sm font-semibold">Contact Info</h2>
+                                {!editingContact ? (
+                                    <button onClick={() => {
+                                        setEditContact({
+                                            email: candidate.email || '',
+                                            phone: candidate.phone || '',
+                                            countryCode: candidate.countryCode || '+91',
+                                            location: candidate.location || '',
+                                            currentCompany: candidate.currentCompany || '',
+                                        })
+                                        setEditingContact(true)
+                                    }}
+                                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit contact info">
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : (
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => updateFieldMutation.mutate({
+                                            email: editContact.email,
+                                            phone: editContact.phone,
+                                            countryCode: editContact.countryCode,
+                                            location: editContact.location,
+                                            currentCompany: editContact.currentCompany,
+                                        })}
+                                            disabled={updateFieldMutation.isPending}
+                                            className="p-1.5 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 transition-colors" title="Save">
+                                            <Check className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button onClick={() => setEditingContact(false)}
+                                            className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-colors" title="Cancel">
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
                                     </div>
                                 )}
                             </div>
+                            {editingContact ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Email</label>
+                                        <input type="email" value={editContact.email} onChange={(e) => setEditContact({ ...editContact, email: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Phone</label>
+                                        <div className="flex gap-2 mt-1">
+                                            <input value={editContact.countryCode} onChange={(e) => setEditContact({ ...editContact, countryCode: e.target.value })}
+                                                className="w-20 px-2 py-2 text-sm border border-border rounded-lg bg-background" placeholder="+91" />
+                                            <input value={editContact.phone} onChange={(e) => setEditContact({ ...editContact, phone: e.target.value })}
+                                                className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Location</label>
+                                        <input value={editContact.location} onChange={(e) => setEditContact({ ...editContact, location: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. Mumbai" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Current Company</label>
+                                        <input value={editContact.currentCompany} onChange={(e) => setEditContact({ ...editContact, currentCompany: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                    <a href={`mailto:${candidate.email}`} className="flex items-center gap-2 text-primary hover:underline">
+                                        <Mail className="h-3.5 w-3.5" /> {candidate.email}
+                                    </a>
+                                    {candidate.phone && (
+                                        <a href={`tel:${candidate.countryCode || '+91'}${candidate.phone}`} className="flex items-center gap-2 text-primary hover:underline">
+                                            <Phone className="h-3.5 w-3.5" /> {candidate.countryCode || '+91'} {candidate.phone}
+                                        </a>
+                                    )}
+                                    {candidate.location && (
+                                        <div className="flex items-center gap-2 text-muted-foreground">
+                                            <MapPin className="h-3.5 w-3.5" /> {candidate.location}
+                                        </div>
+                                    )}
+                                    {candidate.currentCompany && (
+                                        <div className="flex items-center gap-2 text-muted-foreground">
+                                            <Briefcase className="h-3.5 w-3.5" /> {candidate.currentCompany}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Professional */}
                         <div className="rounded-xl border border-border bg-card p-5">
-                            <h2 className="text-sm font-semibold mb-4">Professional Info</h2>
-                            <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div><span className="text-muted-foreground">Experience:</span> <span className="font-medium">{candidate.experience || 'N/A'}</span></div>
-                                <div><span className="text-muted-foreground">CTC:</span> <span className="font-medium">{candidate.ctc ? `₹${candidate.ctc.toLocaleString()}` : 'N/A'}</span></div>
-                                <div><span className="text-muted-foreground">Notice Period:</span> <span className="font-medium">{candidate.noticePeriod != null ? `${candidate.noticePeriod} days` : 'N/A'}</span></div>
-                                <div><span className="text-muted-foreground">Designation:</span> <span className="font-medium">{candidate.designation || 'N/A'}</span></div>
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-sm font-semibold">Professional Info</h2>
+                                {!editingProfessional ? (
+                                    <button onClick={() => {
+                                        setEditProfessional({
+                                            experience: candidate.experience?.toString() || '',
+                                            ctc: candidate.ctc?.toString() || '',
+                                            noticePeriod: candidate.noticePeriod?.toString() || '',
+                                            designation: candidate.designation || '',
+                                            skills: (candidate.skills || []).join(', '),
+                                        })
+                                        setEditingProfessional(true)
+                                    }}
+                                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit professional info">
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : (
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => updateFieldMutation.mutate({
+                                            experience: editProfessional.experience ? Number(editProfessional.experience) : undefined,
+                                            ctc: editProfessional.ctc ? Number(editProfessional.ctc) : undefined,
+                                            noticePeriod: editProfessional.noticePeriod ? Number(editProfessional.noticePeriod) : undefined,
+                                            designation: editProfessional.designation,
+                                            skills: editProfessional.skills.split(',').map((s: string) => s.trim()).filter(Boolean),
+                                        })}
+                                            disabled={updateFieldMutation.isPending}
+                                            className="p-1.5 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 transition-colors" title="Save">
+                                            <Check className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button onClick={() => setEditingProfessional(false)}
+                                            className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-colors" title="Cancel">
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                            {candidate.skills?.length > 0 && (
-                                <div className="mt-4">
-                                    <span className="text-xs text-muted-foreground">Skills:</span>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {candidate.skills.map((s: string) => (
-                                            <span key={s} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{s}</span>
-                                        ))}
+                            {editingProfessional ? (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">Experience (yrs)</label>
+                                            <input type="number" step="any" value={editProfessional.experience} onChange={(e) => setEditProfessional({ ...editProfessional, experience: e.target.value })}
+                                                className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">CTC (INR)</label>
+                                            <input type="number" step="any" value={editProfessional.ctc} onChange={(e) => setEditProfessional({ ...editProfessional, ctc: e.target.value })}
+                                                className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">Notice Period (days)</label>
+                                            <input type="number" value={editProfessional.noticePeriod} onChange={(e) => setEditProfessional({ ...editProfessional, noticePeriod: e.target.value })}
+                                                className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">Designation</label>
+                                            <input value={editProfessional.designation} onChange={(e) => setEditProfessional({ ...editProfessional, designation: e.target.value })}
+                                                className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground">Skills (comma-separated)</label>
+                                        <input value={editProfessional.skills} onChange={(e) => setEditProfessional({ ...editProfessional, skills: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. React, Node.js, Python" />
                                     </div>
                                 </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                        <div><span className="text-muted-foreground">Experience:</span> <span className="font-medium">{candidate.experience || 'N/A'}</span></div>
+                                        <div><span className="text-muted-foreground">CTC:</span> <span className="font-medium">{candidate.ctc ? `₹${candidate.ctc.toLocaleString()}` : 'N/A'}</span></div>
+                                        <div><span className="text-muted-foreground">Notice Period:</span> <span className="font-medium">{candidate.noticePeriod != null ? `${candidate.noticePeriod} days` : 'N/A'}</span></div>
+                                        <div><span className="text-muted-foreground">Designation:</span> <span className="font-medium">{candidate.designation || 'N/A'}</span></div>
+                                    </div>
+                                    {candidate.skills?.length > 0 && (
+                                        <div className="mt-4">
+                                            <span className="text-xs text-muted-foreground">Skills:</span>
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {candidate.skills.map((s: string) => (
+                                                    <span key={s} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{s}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
 
@@ -268,9 +434,11 @@ export default function CandidateDetailPage({ params }: { params: Promise<{ id: 
                             <div className="rounded-xl border border-border bg-card p-5">
                                 <h2 className="text-sm font-semibold mb-3">Resume</h2>
                                 <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                        <FileText className="h-4 w-4" />
-                                        <span>{candidate.resumeFilename || candidate.resumeFile}</span>
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                                        <FileText className="h-4 w-4 shrink-0" />
+                                        <span className="truncate max-w-[260px]" title={candidate.resumeFilename || candidate.resumeFile}>
+                                            {niceFilename(candidate.resumeFilename || candidate.resumeFile)}
+                                        </span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <a href={`/api/files/download/${candidate.resumeFile}`} target="_blank" rel="noopener"

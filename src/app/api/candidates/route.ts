@@ -19,6 +19,15 @@ export async function GET(req: Request) {
         const search = searchParams.get('search')
         const positionId = searchParams.get('positionId')
         const clientId = searchParams.get('clientId')
+        const minExp = searchParams.get('minExp')
+        const maxExp = searchParams.get('maxExp')
+        const location = searchParams.get('location')
+        const minCTC = searchParams.get('minCTC')
+        const maxCTC = searchParams.get('maxCTC')
+        const maxNotice = searchParams.get('maxNotice')
+        const skills = searchParams.get('skills')
+        const designation = searchParams.get('designation')
+        const company = searchParams.get('company')
         const page = parseInt(searchParams.get('page') || '1')
         const limit = parseInt(searchParams.get('limit') || '50')
 
@@ -26,13 +35,38 @@ export async function GET(req: Request) {
         if (status) filter.status = status
         if (positionId) filter.positionId = positionId
         if (clientId) filter.clientId = clientId
+        if (minExp) filter.experience = { ...filter.experience, $gte: Number(minExp) }
+        if (maxExp) filter.experience = { ...filter.experience, $lte: Number(maxExp) }
+        if (minCTC) filter.ctc = { ...filter.ctc, $gte: Number(minCTC) }
+        if (maxCTC) filter.ctc = { ...filter.ctc, $lte: Number(maxCTC) }
+        if (maxNotice) filter.noticePeriod = { $lte: Number(maxNotice) }
+        if (location) {
+            const escapedLoc = location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            filter.location = { $regex: escapedLoc, $options: 'i' }
+        }
         if (search) {
             const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             filter.$or = [
                 { name: { $regex: escaped, $options: 'i' } },
                 { email: { $regex: escaped, $options: 'i' } },
                 { phone: { $regex: escaped, $options: 'i' } },
+                { designation: { $regex: escaped, $options: 'i' } },
+                { currentCompany: { $regex: escaped, $options: 'i' } },
             ]
+        }
+        if (skills) {
+            const skillList = skills.split(',').map(s => s.trim()).filter(Boolean)
+            if (skillList.length > 0) {
+                filter.skills = { $all: skillList.map(s => new RegExp(s, 'i')) }
+            }
+        }
+        if (designation) {
+            const esc = designation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            filter.designation = { $regex: esc, $options: 'i' }
+        }
+        if (company) {
+            const esc = company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            filter.currentCompany = { $regex: esc, $options: 'i' }
         }
 
         // Apply role-based scoping

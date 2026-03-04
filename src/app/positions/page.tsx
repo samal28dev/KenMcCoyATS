@@ -271,12 +271,12 @@ export default function PositionsPage() {
                             <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="text-xs font-medium text-muted-foreground">Min Experience (years)</label>
-                                    <input type="number" value={form.minExperience} onChange={(e) => setForm({ ...form, minExperience: e.target.value })}
+                                    <input type="number" step="any" value={form.minExperience} onChange={(e) => setForm({ ...form, minExperience: e.target.value })}
                                         className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-muted-foreground">Max Experience (years)</label>
-                                    <input type="number" value={form.maxExperience} onChange={(e) => setForm({ ...form, maxExperience: e.target.value })}
+                                    <input type="number" step="any" value={form.maxExperience} onChange={(e) => setForm({ ...form, maxExperience: e.target.value })}
                                         className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
                                 </div>
                                 <div>

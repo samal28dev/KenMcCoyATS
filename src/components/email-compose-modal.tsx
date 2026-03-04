@@ -16,11 +16,12 @@ interface EmailComposeModalProps {
     positionId?: string
     resumeFile?: string        // candidate's resume filename
     jdFile?: string            // position's JD filename
+    clientContacts?: { name?: string; email?: string }[]  // for quick-select
 }
 
 export function EmailComposeModal({
     isOpen, onClose, defaultTo, defaultSubject, candidateId, clientId, positionId,
-    resumeFile, jdFile
+    resumeFile, jdFile, clientContacts
 }: EmailComposeModalProps) {
     const [to, setTo] = useState(defaultTo || '')
     const [cc, setCc] = useState('')
@@ -176,6 +177,25 @@ export function EmailComposeModal({
                                 </button>
                             )}
                         </div>
+                        {/* Client contact quick-select */}
+                        {clientContacts && clientContacts.filter(c => c.email).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
+                                {clientContacts.filter(c => c.email).map((c, i) => (
+                                    <button
+                                        key={i}
+                                        type="button"
+                                        onClick={() => setTo(c.email!)}
+                                        className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${
+                                            to === c.email
+                                                ? 'bg-primary text-primary-foreground border-primary'
+                                                : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        {c.name ? `${c.name} <${c.email}>` : c.email}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                         <input
                             value={to}
                             onChange={(e) => setTo(e.target.value)}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Briefcase, ArrowLeft, Users, FileText, Mail, Plus, ChevronRight } from 'lucide-react'
+import { Briefcase, ArrowLeft, Users, FileText, Mail, Plus, ChevronRight, Pencil, Check, X } from 'lucide-react'
 import Link from 'next/link'
 import { use, useState } from 'react'
 import { AppShell } from '@/components/layout/app-shell'
@@ -29,11 +29,23 @@ function getStageStyle(status: string) {
     return PIPELINE_STAGES.find(s => s.value === status)?.color || 'bg-gray-100 text-gray-700'
 }
 
+// Strip upload prefix (e.g. "jd_1234567890_abc123_") and clean underscores
+function niceFilename(raw: string) {
+    if (!raw) return raw
+    const cleaned = raw.replace(/^(?:jd|resume)_\d+_[a-f0-9]+_/i, '')
+    return cleaned.replace(/_/g, ' ')
+}
+
 export default function PositionDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
     const [emailOpen, setEmailOpen] = useState(false)
     const [assignOpen, setAssignOpen] = useState(false)
     const [selectedCandidateId, setSelectedCandidateId] = useState('')
+    const [editingDesc, setEditingDesc] = useState(false)
+    const [editDesc, setEditDesc] = useState('')
+    const [editingReqs, setEditingReqs] = useState(false)
+    const [editReqs, setEditReqs] = useState('')
+    const [mailCvCandidate, setMailCvCandidate] = useState<{ name: string; id: string; resumeFile?: string } | null>(null)
     const queryClient = useQueryClient()
 
     const { data: position } = useQuery({
@@ -96,6 +108,29 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
             toast.success('Position status updated!')
             queryClient.invalidateQueries({ queryKey: ['position', id] })
             queryClient.invalidateQueries({ queryKey: ['positions'] })
+        },
+        onError: (err: any) => toast.error(err.message),
+    })
+
+    // Update position fields (description, requirements, etc.)
+    const updateFieldMutation = useMutation({
+        mutationFn: async (updates: Record<string, any>) => {
+            const res = await apiFetch(`/api/positions/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.error || 'Failed to update')
+            }
+            return res.json()
+        },
+        onSuccess: () => {
+            toast.success('Position updated!')
+            queryClient.invalidateQueries({ queryKey: ['position', id] })
+            setEditingDesc(false)
+            setEditingReqs(false)
         },
         onError: (err: any) => toast.error(err.message),
     })
@@ -244,8 +279,8 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                                                 </span>
                                             </div>
 
-                                            {/* Stage Buttons */}
-                                            <div className="flex flex-wrap gap-1">
+                                            {/* Stage Buttons + Mail CV */}
+                                            <div className="flex flex-wrap items-center gap-1">
                                                 {PIPELINE_STAGES.map(stage => (
                                                     <button
                                                         key={stage.value}
@@ -263,6 +298,16 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                                                         {stage.label}
                                                     </button>
                                                 ))}
+                                                <button
+                                                    onClick={() => setMailCvCandidate({
+                                                        name: cp.candidateId?.name,
+                                                        id: cp.candidateId?._id,
+                                                        resumeFile: cp.candidateId?.resumeFile,
+                                                    })}
+                                                    className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-[10px] rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors font-medium"
+                                                >
+                                                    <Mail className="h-3 w-3" /> Mail CV to Client
+                                                </button>
                                             </div>
                                         </div>
                                     ))}
@@ -279,21 +324,46 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                         </div>
 
                         {/* Description */}
-                        {position.description && (
-                            <div className="rounded-xl border border-border bg-card p-5">
-                                <h2 className="text-sm font-semibold mb-3">Description</h2>
-                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{position.description}</p>
+                        <div className="rounded-xl border border-border bg-card p-5">
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="text-sm font-semibold">Description</h2>
+                                {!editingDesc ? (
+                                    <button onClick={() => { setEditDesc(position.description || ''); setEditingDesc(true) }}
+                                        className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit description">
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                ) : (
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => updateFieldMutation.mutate({ description: editDesc })}
+                                            disabled={updateFieldMutation.isPending}
+                                            className="p-1.5 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 transition-colors" title="Save">
+                                            <Check className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button onClick={() => setEditingDesc(false)}
+                                            className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-colors" title="Cancel">
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                        )}
+                            {editingDesc ? (
+                                <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)}
+                                    rows={6} className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background resize-y focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                            ) : (
+                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{position.description || 'No description added.'}</p>
+                            )}
+                        </div>
 
                         {/* JD Document */}
                         {position.jdFile && (
                             <div className="rounded-xl border border-border bg-card p-5">
                                 <h2 className="text-sm font-semibold mb-3">Job Description</h2>
                                 <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                        <FileText className="h-4 w-4" />
-                                        <span>{position.jdFilename || position.jdFile}</span>
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                                        <FileText className="h-4 w-4 shrink-0" />
+                                        <span className="truncate max-w-[260px]" title={position.jdFilename || position.jdFile}>
+                                            {niceFilename(position.jdFilename || position.jdFile)}
+                                        </span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <a href={`/api/files/download/${position.jdFile}`} target="_blank" rel="noopener"
@@ -332,16 +402,44 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                             </div>
                         </div>
 
-                        {position.requirements?.length > 0 && (
+                        {(position.requirements?.length > 0 || true) && (
                             <div className="rounded-xl border border-border bg-card p-5">
-                                <h2 className="text-sm font-semibold mb-3">Requirements</h2>
-                                <ul className="space-y-1">
-                                    {position.requirements.map((r: string, i: number) => (
-                                        <li key={i} className="text-sm text-muted-foreground flex gap-2">
-                                            <span>•</span> {r}
-                                        </li>
-                                    ))}
-                                </ul>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h2 className="text-sm font-semibold">Requirements</h2>
+                                    {!editingReqs ? (
+                                        <button onClick={() => { setEditReqs((position.requirements || []).join('\n')); setEditingReqs(true) }}
+                                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Edit requirements">
+                                            <Pencil className="h-3.5 w-3.5" />
+                                        </button>
+                                    ) : (
+                                        <div className="flex items-center gap-1">
+                                            <button onClick={() => updateFieldMutation.mutate({ requirements: editReqs.split('\n').filter((r: string) => r.trim()) })}
+                                                disabled={updateFieldMutation.isPending}
+                                                className="p-1.5 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 text-green-600 transition-colors" title="Save">
+                                                <Check className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button onClick={() => setEditingReqs(false)}
+                                                className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-colors" title="Cancel">
+                                                <X className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                {editingReqs ? (
+                                    <textarea value={editReqs} onChange={(e) => setEditReqs(e.target.value)}
+                                        rows={8} className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background resize-y focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                        placeholder="One requirement per line" />
+                                ) : position.requirements?.length > 0 ? (
+                                    <ul className="space-y-1">
+                                        {position.requirements.map((r: string, i: number) => (
+                                            <li key={i} className="text-sm text-muted-foreground flex gap-2">
+                                                <span>•</span> {r}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground">No requirements added.</p>
+                                )}
                             </div>
                         )}
                     </div>
@@ -357,6 +455,19 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                 clientId={position.clientId?._id}
                 jdFile={position.jdFile}
             />
+
+            {/* Mail CV to Client Modal */}
+            {mailCvCandidate && (
+                <EmailComposeModal
+                    isOpen={!!mailCvCandidate}
+                    onClose={() => setMailCvCandidate(null)}
+                    defaultTo={position.clientId?.contacts?.[0]?.email || ''}
+                    defaultSubject={`CV – ${mailCvCandidate.name} for ${position.title}`}
+                    candidateId={mailCvCandidate.id}
+                    positionId={id}
+                    clientId={position.clientId?._id}
+                    resumeFile={mailCvCandidate.resumeFile}                    clientContacts={position.clientId?.contacts || []}                />
+            )}
         </AppShell>
     )
 }

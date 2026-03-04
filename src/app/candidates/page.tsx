@@ -1,9 +1,9 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, X, Upload, Loader2, Mail, Download, Briefcase, CheckSquare } from 'lucide-react'
+import { Search, Plus, X, Upload, Loader2, Mail, Download, Briefcase, CheckSquare, LayoutGrid, List, AlignJustify, Clock, ChevronUp, Phone, FileText, MessageSquare, Bell } from 'lucide-react'
 import Link from 'next/link'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { AppShell } from '@/components/layout/app-shell'
 import { apiFetch } from '@/lib/api'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -16,10 +16,54 @@ export default function CandidatesPage() {
     const queryClient = useQueryClient()
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
+    const [minExp, setMinExp] = useState('')
+    const [maxExp, setMaxExp] = useState('')
+    const [locationFilter, setLocationFilter] = useState('')
+    const [minCTC, setMinCTC] = useState('')
+    const [maxCTC, setMaxCTC] = useState('')
+    const [maxNotice, setMaxNotice] = useState('')
+    const [skillsFilter, setSkillsFilter] = useState('')
+    const [designationFilter, setDesignationFilter] = useState('')
+    const [companyFilter, setCompanyFilter] = useState('')
+    const [industryFilter, setIndustryFilter] = useState('')
+    const [noticePeriodPill, setNoticePeriodPill] = useState('')
+    const [ugQual, setUgQual] = useState('')
+    const [pgQual, setPgQual] = useState('')
+    const [showEmployment, setShowEmployment] = useState(true)
+    const [showEducation, setShowEducation] = useState(true)
+    const [hasSearched, setHasSearched] = useState(false)
+    const [recentSearches, setRecentSearches] = useState<any[]>([])
+    const [showAddTo, setShowAddTo] = useState(false)
+    const [hideProfiles, setHideProfiles] = useState(false)
+    const [keywordInResults, setKeywordInResults] = useState('')
+    const [sortBy, setSortBy] = useState('Relevance')
+    const [openSections, setOpenSections] = useState<Record<string, boolean>>({ exp: true, salary: true })
+    const toggleSection = (key: string) => setOpenSections(p => ({ ...p, [key]: !p[key] }))
+    const [activeIn, setActiveIn] = useState('6 months')
+    const [showActiveInDrop, setShowActiveInDrop] = useState(false)
+    const [showSortDrop, setShowSortDrop] = useState(false)
+    const [deptRoleFilter, setDeptRoleFilter] = useState('')
+    const [degreeFilter, setDegreeFilter] = useState('')
+    const [collegeFilter, setCollegeFilter] = useState('')
+    const [gradYearFilter, setGradYearFilter] = useState('')
+    const [appliedFilters, setAppliedFilters] = useState({
+        search: '', status: '', minExp: '', maxExp: '',
+        location: '', minCTC: '', maxCTC: '', maxNotice: '', skills: '',
+        designation: '', company: ''
+    })
+
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem('candidate_recent_searches')
+            if (stored) setRecentSearches(JSON.parse(stored))
+        } catch {}
+    }, [])
     const [page, setPage] = useState(1)
     const [showCreate, setShowCreate] = useState(false)
     const [parsing, setParsing] = useState(false)
     const fileRef = useRef<HTMLInputElement>(null)
+
+    const [view, setView] = useState<'compact' | 'list' | 'details'>('compact')
 
     // Bulk selection state
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -39,11 +83,20 @@ export default function CandidatesPage() {
     })
 
     const { data } = useQuery({
-        queryKey: ['candidates', statusFilter, search, page],
+        queryKey: ['candidates', appliedFilters, page],
         queryFn: async () => {
             const params = new URLSearchParams()
-            if (statusFilter) params.set('status', statusFilter)
-            if (search) params.set('search', search)
+            if (appliedFilters.status) params.set('status', appliedFilters.status)
+            if (appliedFilters.search) params.set('search', appliedFilters.search)
+            if (appliedFilters.minExp) params.set('minExp', appliedFilters.minExp)
+            if (appliedFilters.maxExp) params.set('maxExp', appliedFilters.maxExp)
+            if (appliedFilters.location) params.set('location', appliedFilters.location)
+            if (appliedFilters.minCTC) params.set('minCTC', String(Number(appliedFilters.minCTC) * 100000))
+            if (appliedFilters.maxCTC) params.set('maxCTC', String(Number(appliedFilters.maxCTC) * 100000))
+            if (appliedFilters.maxNotice) params.set('maxNotice', appliedFilters.maxNotice)
+            if (appliedFilters.skills) params.set('skills', appliedFilters.skills)
+            if ((appliedFilters as any).designation) params.set('designation', (appliedFilters as any).designation)
+            if ((appliedFilters as any).company) params.set('company', (appliedFilters as any).company)
             params.set('page', page.toString())
             params.set('limit', '30')
             const res = await apiFetch(`/api/candidates?${params}`)
@@ -51,9 +104,84 @@ export default function CandidatesPage() {
         },
     })
 
+    // Map notice period pill to maxNotice days
+    const noticePillToMaxNotice = (pill: string) => {
+        if (pill === '15') return '15'
+        if (pill === '30') return '30'
+        if (pill === '60') return '60'
+        if (pill === '90') return '90'
+        return ''
+    }
+
+    const handleSearch = () => {
+        const filters = {
+            search, status: statusFilter, minExp, maxExp,
+            location: locationFilter, minCTC, maxCTC,
+            maxNotice: noticePillToMaxNotice(noticePeriodPill),
+            skills: skillsFilter, designation: designationFilter, company: companyFilter
+        }
+        setAppliedFilters(filters)
+        setPage(1)
+        setHasSearched(true)
+        // Save to recent searches
+        const parts = [
+            skillsFilter && `Skills: ${skillsFilter}`,
+            (minExp || maxExp) && `Exp: ${minExp||'0'}-${maxExp||'∞'} yrs`,
+            locationFilter && locationFilter,
+            (minCTC || maxCTC) && `${minCTC||'0'}-${maxCTC||'∞'} Lacs`,
+            noticePeriodPill && `Notice ≤ ${noticePeriodPill}d`,
+            designationFilter && designationFilter,
+            companyFilter && companyFilter,
+        ].filter(Boolean)
+        if (parts.length > 0) {
+            const label = parts.join(' | ')
+            const entry = { label, filters }
+            setRecentSearches(prev => {
+                const updated = [entry, ...prev.filter(r => r.label !== label)].slice(0, 5)
+                try { localStorage.setItem('candidate_recent_searches', JSON.stringify(updated)) } catch {}
+                return updated
+            })
+        }
+    }
+
+    const fillSearch = (entry: any) => {
+        const f = entry.filters
+        setSearch(f.search || ''); setStatusFilter(f.status || '')
+        setMinExp(f.minExp || ''); setMaxExp(f.maxExp || '')
+        setLocationFilter(f.location || ''); setMinCTC(f.minCTC || ''); setMaxCTC(f.maxCTC || '')
+        setSkillsFilter(f.skills || ''); setDesignationFilter(f.designation || ''); setCompanyFilter(f.company || '')
+    }
+
+    const handleClearFilters = () => {
+        setSearch(''); setStatusFilter(''); setMinExp(''); setMaxExp('')
+        setLocationFilter(''); setMinCTC(''); setMaxCTC(''); setMaxNotice(''); setSkillsFilter('')
+        setDesignationFilter(''); setCompanyFilter(''); setIndustryFilter('')
+        setNoticePeriodPill(''); setUgQual(''); setPgQual('')
+        setAppliedFilters({ search: '', status: '', minExp: '', maxExp: '', location: '', minCTC: '', maxCTC: '', maxNotice: '', skills: '', designation: '', company: '' })
+        setHasSearched(false)
+        setPage(1)
+    }
+
+    const activeFilterCount = Object.values(appliedFilters).filter(Boolean).length
+
     const candidates = data?.candidates ?? []
     const total = data?.total ?? 0
     const totalPages = data?.totalPages ?? 1
+
+    // Active-in filter + sort applied client-side
+    const activeInDays: number | null = activeIn === '1 month' ? 30 : activeIn === '3 months' ? 90 : activeIn === '1 year' ? 365 : activeIn === 'Any' ? null : 180
+    const displayCandidates = [...candidates]
+        .filter((c: any) => {
+            if (!activeInDays) return true
+            const t = new Date(c.updatedAt || c.createdAt).getTime()
+            return (Date.now() - t) <= activeInDays * 86400000
+        })
+        .sort((a: any, b: any) => {
+            if (sortBy === 'Experience') return (Number(b.experience) || 0) - (Number(a.experience) || 0)
+            if (sortBy === 'Modified date') return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+            if (sortBy === 'CTC') return (Number(b.ctc) || 0) - (Number(a.ctc) || 0)
+            return 0
+        })
 
     const createMutation = useMutation({
         mutationFn: async (data: any) => {
@@ -301,96 +429,595 @@ export default function CandidatesPage() {
 
     return (
         <AppShell>
-            <div className="min-h-screen">
-                <div className="border-b border-border/50 bg-background">
-                    <div className="px-6 py-6 max-w-7xl mx-auto flex items-center justify-between">
-                        <div>
-                            <h1 className="text-2xl font-semibold tracking-tight">Candidates</h1>
-                            <p className="text-sm text-muted-foreground mt-1">{total} total</p>
-                        </div>
-                        <button onClick={() => setShowCreate(true)}
-                            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 flex items-center gap-2">
-                            <Plus className="h-4 w-4" /> Add Candidate
+            <div className="min-h-screen bg-background">
+                {!hasSearched && (<>
+                {/* Tab bar */}
+                <div className="border-b border-border bg-background">
+                    <div className="max-w-5xl mx-auto px-6 flex items-center">
+                        <button className="px-0 py-3.5 text-sm font-medium border-b-2 border-primary text-primary mr-8">
+                            Search candidates
+                        </button>
+                        <button onClick={() => setShowCreate(true)} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground">
+                            Add Candidate
                         </button>
                     </div>
                 </div>
 
-                <div className="max-w-7xl mx-auto px-6 py-6">
-                    <div className="flex gap-3 mb-6 items-center">
-                        <label className="flex items-center gap-1.5 cursor-pointer shrink-0" title="Select all">
-                            <input type="checkbox"
-                                checked={candidates.length > 0 && selectedIds.size === candidates.length}
-                                onChange={toggleSelectAll}
-                                className="rounded border-border h-4 w-4 accent-primary" />
-                            <CheckSquare className="h-4 w-4 text-muted-foreground" />
-                        </label>
-                        <div className="relative flex-1 max-w-sm">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-                                className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded-lg bg-background"
-                                placeholder="Search by name, email, phone..." />
-                        </div>
-                        <Select value={statusFilter || 'all'} onValueChange={(val) => { setStatusFilter(val === 'all' ? '' : val); setPage(1) }}>
-                            <SelectTrigger className="w-[150px]">
-                                <SelectValue placeholder="All Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Status</SelectItem>
-                                <SelectItem value="new">New</SelectItem>
-                                <SelectItem value="screening">Screening</SelectItem>
-                                <SelectItem value="shortlisted">Shortlisted</SelectItem>
-                                <SelectItem value="interview">Interview</SelectItem>
-                                <SelectItem value="offered">Offered</SelectItem>
-                                <SelectItem value="joined">Joined</SelectItem>
-                                <SelectItem value="rejected">Rejected</SelectItem>
-                                <SelectItem value="on_hold">On Hold</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
+                {/* Two columns */}
+                <div className="max-w-5xl mx-auto px-6 pt-8 pb-6 flex gap-12">
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {candidates.map((c: any) => (
-                            <div key={c._id} className="relative group">
-                                <div className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
-                                    <input type="checkbox"
-                                        checked={selectedIds.has(c._id)}
-                                        onChange={() => toggleSelect(c._id)}
-                                        className="rounded border-border h-4 w-4 accent-primary cursor-pointer" />
-                                </div>
-                                <Link href={`/candidates/${c._id}`}>
-                                    <div className={`rounded-xl border bg-card p-4 pl-9 hover:shadow-md transition-all cursor-pointer ${selectedIds.has(c._id) ? 'border-primary/50 bg-primary/5' : 'border-border'}`}>
-                                    <div className="flex items-start justify-between mb-2">
-                                        <h3 className="text-sm font-semibold">{c.name}</h3>
-                                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[c.status] || 'bg-gray-100 text-gray-600'}`}>
-                                            {c.status}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">{c.email}</p>
-                                    {c.phone && <p className="text-xs text-muted-foreground">{c.countryCode || '+91'} {c.phone}</p>}
-                                    <div className="flex gap-2 mt-2 flex-wrap">
-                                        {c.designation && <span className="text-xs bg-muted px-2 py-0.5 rounded">{c.designation}</span>}
-                                        {c.location && <span className="text-xs bg-muted px-2 py-0.5 rounded">{c.location}</span>}
-                                    </div>
-                                    </div>
-                                </Link>
+                    {/* LEFT: Search form */}
+                    <div className="flex-1">
+                        <h1 className="text-[1.875rem] font-bold mb-7">Search candidates</h1>
+
+                        {/* Keywords */}
+                        <div className="mb-5">
+                            <label className="text-sm font-medium mb-1.5 block">Keywords</label>
+                            <input
+                                value={skillsFilter}
+                                onChange={(e) => setSkillsFilter(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                placeholder="Enter keywords like skills, designation and company"
+                                className="w-full px-4 py-3 text-sm border border-border rounded focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                            />
+                        </div>
+
+                        {/* Experience */}
+                        <div className="mb-5">
+                            <label className="text-sm font-medium mb-2.5 block">Experience</label>
+                            <div className="flex items-center gap-3">
+                                <input type="number" value={minExp} onChange={(e) => setMinExp(e.target.value)}
+                                    placeholder="Min experience" min="0" step="0.5"
+                                    className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                <span className="text-sm text-muted-foreground">to</span>
+                                <input type="number" value={maxExp} onChange={(e) => setMaxExp(e.target.value)}
+                                    placeholder="Max experience" min="0" step="0.5"
+                                    className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                <span className="text-sm text-muted-foreground">Years</span>
                             </div>
-                        ))}
+                        </div>
+
+                        {/* Location */}
+                        <div className="mb-5">
+                            <label className="text-sm font-medium mb-2.5 block">Current location of candidate</label>
+                            <input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}
+                                placeholder="Add location"
+                                className="w-full px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                        </div>
+
+                        {/* Annual Salary */}
+                        <div className="mb-6">
+                            <label className="text-sm font-medium mb-2.5 block">Annual Salary</label>
+                            <div className="flex items-center gap-3">
+                                <span className="text-sm text-muted-foreground border border-border rounded px-3 py-2.5 bg-muted/40 shrink-0">INR</span>
+                                <input type="number" value={minCTC} onChange={(e) => setMinCTC(e.target.value)}
+                                    placeholder="Min salary" min="0"
+                                    className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                <span className="text-sm text-muted-foreground">to</span>
+                                <input type="number" value={maxCTC} onChange={(e) => setMaxCTC(e.target.value)}
+                                    placeholder="Max salary" min="0"
+                                    className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                <span className="text-sm text-muted-foreground">Lacs</span>
+                            </div>
+                        </div>
+
+                        {/* Employment Details */}
+                        <div className="border-t border-border pt-5 mb-4">
+                            <button onClick={() => setShowEmployment(v => !v)}
+                                className="w-full flex items-center justify-between text-left mb-0.5">
+                                <h2 className="text-[0.9375rem] font-semibold">Employment Details</h2>
+                                <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEmployment ? '' : 'rotate-180'}`} />
+                            </button>
+                            {showEmployment && (
+                                <div className="mt-5 space-y-4">
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-1.5 block">Industry</label>
+                                        <input value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}
+                                            placeholder="Add industry"
+                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-1.5 block">Company</label>
+                                        <input value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
+                                            placeholder="Add company name"
+                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-1.5 block">Designation</label>
+                                        <input value={designationFilter} onChange={(e) => setDesignationFilter(e.target.value)}
+                                            placeholder="Add designation"
+                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-2 block">Notice Period / Availability to join ⓘ</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {[
+                                                { label: 'Any', value: '' },
+                                                { label: '0 - 15 days', value: '15' },
+                                                { label: '1 month', value: '30' },
+                                                { label: '2 months', value: '60' },
+                                                { label: '3 months', value: '90' },
+                                                { label: 'More than 3 months', value: '999' },
+                                            ].map(opt => (
+                                                <button key={opt.value}
+                                                    onClick={() => setNoticePeriodPill(noticePeriodPill === opt.value ? '' : opt.value)}
+                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${(noticePeriodPill === opt.value) || (opt.value === '' && noticePeriodPill === '') ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                    {opt.label}{noticePeriodPill === opt.value && opt.value !== '' ? ' ×' : ' +'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Education Details */}
+                        <div className="border-t border-border pt-5 mb-8">
+                            <button onClick={() => setShowEducation(v => !v)}
+                                className="w-full flex items-center justify-between text-left mb-0.5">
+                                <h2 className="text-[0.9375rem] font-semibold">Education Details</h2>
+                                <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEducation ? '' : 'rotate-180'}`} />
+                            </button>
+                            {showEducation && (
+                                <div className="mt-5 space-y-4">
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-2 block">UG Qualification</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['Any UG qualification', 'Specific UG qualification', 'No UG qualification'].map(opt => (
+                                                <button key={opt} onClick={() => setUgQual(ugQual === opt ? '' : opt)}
+                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${ugQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                    {opt}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-muted-foreground mb-2 block">PG Qualification</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {['Any PG qualification', 'Specific PG qualification', 'No PG qualification'].map(opt => (
+                                                <button key={opt} onClick={() => setPgQual(pgQual === opt ? '' : opt)}
+                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${pgQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                    {opt}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Bottom row: Active in + Search button */}
+                        <div className="flex items-center justify-between border-t border-border pt-4">
+                            <div className="relative">
+                                <button onClick={() => setShowActiveInDrop(v => !v)}
+                                    className="text-sm text-muted-foreground flex items-center gap-1.5 border border-border rounded px-3 py-2 hover:bg-muted/40">
+                                    Active in — <span className="font-medium">{activeIn}</span>
+                                    <ChevronUp className={`h-3.5 w-3.5 ml-0.5 transition-transform ${showActiveInDrop ? '' : 'rotate-180'}`} />
+                                </button>
+                                {showActiveInDrop && (
+                                    <div className="absolute bottom-full left-0 mb-1 z-20 bg-background border border-border rounded shadow-lg w-40">
+                                        {['1 month', '3 months', '6 months', '1 year', 'Any'].map(opt => (
+                                            <button key={opt} onClick={() => { setActiveIn(opt); setShowActiveInDrop(false) }}
+                                                className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${activeIn === opt ? 'font-semibold text-blue-600' : ''}`}>
+                                                {opt}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <button onClick={handleSearch}
+                                className="px-8 py-2.5 bg-[#4A90D9] hover:bg-[#3a80c9] text-white rounded font-medium text-sm transition-colors">
+                                Search candidates
+                            </button>
+                        </div>
                     </div>
 
-                    {candidates.length === 0 && (
-                        <div className="text-center py-16 text-muted-foreground text-sm">No candidates found</div>
-                    )}
-
-                    {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-2 mt-8">
-                            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                                className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent disabled:opacity-50">Previous</button>
-                            <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
-                            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                                className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent disabled:opacity-50">Next</button>
-                        </div>
-                    )}
+                    {/* RIGHT: Recent Searches */}
+                    <div className="w-64 shrink-0 pt-1">
+                        <h2 className="text-base font-semibold flex items-center gap-2 mb-5">
+                            <Clock className="h-4 w-4" /> Recent Searches
+                        </h2>
+                        {recentSearches.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No recent searches</p>
+                        ) : (
+                            <div className="space-y-5">
+                                {recentSearches.map((s: any, i: number) => (
+                                    <div key={i} className="border-b border-border pb-5">
+                                        <p className="text-sm mb-2 leading-snug">{s.label}</p>
+                                        <div className="flex gap-3">
+                                            <button onClick={() => fillSearch(s)} className="text-xs text-blue-600 hover:underline">Fill this search</button>
+                                            <button onClick={() => { fillSearch(s); handleSearch() }} className="text-xs text-blue-600 hover:underline">Search profiles</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
+                </>)}
+
+                {/* RESULTS — shown after search */}
+                {hasSearched && (
+                    <div className="bg-background">
+                        {/* Summary bar */}
+                        <div className="border-b border-border">
+                            <div className="px-6 py-3 flex items-center gap-2 text-sm">
+                                <Search className="h-4 w-4 text-muted-foreground shrink-0" />
+                                <span className="text-muted-foreground">›</span>
+                                <span className="font-medium">Found <span className="font-bold">{total}</span> profile{total !== 1 ? 's' : ''}</span>
+                                {[appliedFilters.skills, appliedFilters.designation, appliedFilters.location].filter(Boolean).length > 0 && (
+                                    <span className="text-muted-foreground">for ({[appliedFilters.skills, appliedFilters.designation, appliedFilters.location].filter(Boolean).join(' | ')})</span>
+                                )}
+                                <button onClick={() => setHasSearched(false)} className="text-blue-600 hover:underline ml-1">Modify</button>
+                                <button onClick={() => toast.success('Search saved')} className="ml-auto px-4 py-1.5 border border-border rounded text-sm hover:bg-muted">Save Search</button>
+                            </div>
+                        </div>
+
+                        {/* Two-column layout */}
+                        <div className="flex">
+
+                            {/* LEFT sidebar */}
+                            <div className="w-[260px] shrink-0 border-r border-border min-h-screen px-4 py-5">
+                                <label className="flex items-center gap-2 text-sm cursor-pointer pb-4 border-b border-border">
+                                    <input type="checkbox" checked={hideProfiles} onChange={e => setHideProfiles(e.target.checked)}
+                                        className="h-4 w-4 rounded border-border" />
+                                    Hide Profiles
+                                </label>
+
+                                <div className="pt-4 pb-3 border-b border-border flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold flex items-center gap-1.5">≡ Filters
+                                        {activeFilterCount > 0 && <span className="text-xs bg-orange-500 text-white px-1.5 py-0.5 rounded font-medium ml-1">New</span>}
+                                    </h3>
+                                    {activeFilterCount > 0 && (
+                                        <button onClick={handleClearFilters} className="text-xs text-blue-600 hover:underline">Reset</button>
+                                    )}
+                                </div>
+
+                                {activeFilterCount > 0 && (
+                                    <div className="py-3 border-b border-border">
+                                        <p className="text-xs text-muted-foreground mb-2">{activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} applied</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {appliedFilters.skills && appliedFilters.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => (
+                                                <span key={s} className="flex items-center gap-1 text-xs px-2 py-0.5 border border-border rounded">
+                                                    {s.toUpperCase()}
+                                                    <button onClick={() => { const u = appliedFilters.skills.split(',').map((x:string)=>x.trim()).filter((x:string)=>x!==s).join(', '); setSkillsFilter(u); setAppliedFilters(f=>({...f,skills:u})) }}>×</button>
+                                                </span>
+                                            ))}
+                                            {appliedFilters.location && <span className="flex items-center gap-1 text-xs px-2 py-0.5 border border-border rounded">{appliedFilters.location} <button onClick={()=>{setLocationFilter('');setAppliedFilters(f=>({...f,location:''}))}} >×</button></span>}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <label className="flex items-center gap-2 text-sm cursor-pointer py-3 border-b border-border">
+                                    <input type="checkbox" className="h-4 w-4 rounded border-border" />
+                                    Premium Institute Candidates
+                                </label>
+
+                                {[
+                                    { label: 'Keywords', key: 'keywords', content: (
+                                        <div className="relative mt-2">
+                                            <input value={keywordInResults} onChange={e => setKeywordInResults(e.target.value)}
+                                                placeholder="Search keyword"
+                                                className="w-full pl-3 pr-8 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                        </div>
+                                    )},
+                                    { label: 'Current company', key: 'company', content: (
+                                        <input value={companyFilter} onChange={e => setCompanyFilter(e.target.value)}
+                                            placeholder="Add company" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Location', key: 'location', content: (
+                                        <input value={locationFilter} onChange={e => setLocationFilter(e.target.value)}
+                                            placeholder="Add location" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Experience (Years)', key: 'exp', content: (
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <input type="number" value={minExp} onChange={e => setMinExp(e.target.value)} placeholder="Min"
+                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            <span className="text-sm text-muted-foreground shrink-0">to</span>
+                                            <input type="number" value={maxExp} onChange={e => setMaxExp(e.target.value)} placeholder="Max"
+                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        </div>
+                                    )},
+                                    { label: 'Salary (INR-Lacs)', key: 'salary', content: (
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <input type="number" value={minCTC} onChange={e => setMinCTC(e.target.value)} placeholder="Min"
+                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            <span className="text-sm text-muted-foreground shrink-0">to</span>
+                                            <input type="number" value={maxCTC} onChange={e => setMaxCTC(e.target.value)} placeholder="Max"
+                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        </div>
+                                    )},
+                                    { label: 'Current designation', key: 'desig', content: (
+                                        <input value={designationFilter} onChange={e => setDesignationFilter(e.target.value)}
+                                            placeholder="Add designation" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Department and Role', key: 'dept', content: (
+                                        <input value={deptRoleFilter} onChange={e => setDeptRoleFilter(e.target.value)}
+                                            placeholder="Add department or role" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Industry', key: 'industry', content: (
+                                        <input value={industryFilter} onChange={e => setIndustryFilter(e.target.value)}
+                                            placeholder="Add industry" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Notice period', key: 'notice', content: (
+                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                            {[{l:'Any',v:''},{l:'0-15 days',v:'15'},{l:'1 month',v:'30'},{l:'2 months',v:'60'},{l:'3 months',v:'90'},{l:'>3 months',v:'999'}].map(o=>(
+                                                <button key={o.v} onClick={()=>setNoticePeriodPill(o.v)}
+                                                    className={`px-3 py-1 text-xs border rounded-full ${noticePeriodPill===o.v ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border hover:border-blue-300'}`}>{o.l}</button>
+                                            ))}
+                                        </div>
+                                    )},
+                                    { label: 'Degree/Course', key: 'degree', content: (
+                                        <input value={degreeFilter} onChange={e => setDegreeFilter(e.target.value)}
+                                            placeholder="e.g. B.Tech, MBA" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'College name', key: 'college', content: (
+                                        <input value={collegeFilter} onChange={e => setCollegeFilter(e.target.value)}
+                                            placeholder="Add college name" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                    { label: 'Year of degree completion', key: 'gradyr', content: (
+                                        <input type="number" value={gradYearFilter} onChange={e => setGradYearFilter(e.target.value)}
+                                            placeholder="e.g. 2020" min="1980" max="2030"
+                                            className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                    )},
+                                ].map(({ label, key, content }) => (
+                                    <div key={key} className="border-b border-border">
+                                        <button onClick={() => toggleSection(key)}
+                                            className="w-full flex items-center justify-between py-3 text-sm text-foreground">
+                                            <span>{label}</span>
+                                            <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-150 ${openSections[key] ? '' : 'rotate-180'}`} />
+                                        </button>
+                                        {openSections[key] && content && <div className="pb-3">{content}</div>}
+                                    </div>
+                                ))}
+
+                                <button onClick={handleSearch}
+                                    className="mt-4 w-full py-2 bg-[#4A90D9] hover:bg-[#3a80c9] text-white rounded text-sm font-medium transition-colors">
+                                    Apply filters
+                                </button>
+                            </div>
+
+                            {/* RIGHT: results */}
+                            <div className="flex-1 min-w-0 px-6 py-4">
+                                {/* Controls row */}
+                                <div className="flex items-center gap-3 mb-4 text-sm flex-wrap">
+                                    {/* Active in dropdown */}
+                                    <div className="relative">
+                                        <button onClick={() => { setShowActiveInDrop(v => !v); setShowSortDrop(false) }}
+                                            className="flex items-center gap-1.5 border border-border rounded px-3 py-1.5 hover:bg-muted text-sm">
+                                            Active in — <span className="font-medium ml-0.5">{activeIn}</span>
+                                            <ChevronUp className={`h-3.5 w-3.5 ml-1 transition-transform ${showActiveInDrop ? '' : 'rotate-180'}`} />
+                                        </button>
+                                        {showActiveInDrop && (
+                                            <div className="absolute top-full left-0 mt-1 z-20 bg-background border border-border rounded shadow-lg w-40">
+                                                {['1 month', '3 months', '6 months', '1 year', 'Any'].map(opt => (
+                                                    <button key={opt} onClick={() => { setActiveIn(opt); setShowActiveInDrop(false) }}
+                                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${activeIn === opt ? 'font-semibold text-blue-600' : ''}`}>
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="ml-auto flex items-center gap-3">
+                                        {/* Sort by dropdown */}
+                                        <div className="relative">
+                                            <button onClick={() => { setShowSortDrop(v => !v); setShowActiveInDrop(false) }}
+                                                className="flex items-center gap-1.5 border border-border rounded px-3 py-1.5 hover:bg-muted text-sm">
+                                                Sort: <span className="font-medium ml-0.5">{sortBy}</span>
+                                                <ChevronUp className={`h-3.5 w-3.5 ml-1 transition-transform ${showSortDrop ? '' : 'rotate-180'}`} />
+                                            </button>
+                                            {showSortDrop && (
+                                                <div className="absolute top-full right-0 mt-1 z-20 bg-background border border-border rounded shadow-lg w-44">
+                                                    {['Relevance', 'Modified date', 'Experience', 'CTC'].map(opt => (
+                                                        <button key={opt} onClick={() => { setSortBy(opt); setShowSortDrop(false) }}
+                                                            className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${sortBy === opt ? 'font-semibold text-blue-600' : ''}`}>
+                                                            {opt}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1 border border-border rounded">
+                                            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                                                className="px-2 py-1.5 hover:bg-muted disabled:opacity-40 text-base leading-none">&lsaquo;</button>
+                                            <span className="px-2 text-xs text-muted-foreground">{page}/{Math.max(1,totalPages)}</span>
+                                            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                                                className="px-2 py-1.5 hover:bg-muted disabled:opacity-40 text-base leading-none">&rsaquo;</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Bulk action bar */}
+                                {selectedIds.size > 0 && (
+                                    <div className="flex items-center gap-3 border border-border rounded px-4 py-2.5 mb-4 bg-background relative">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input type="checkbox"
+                                                checked={candidates.length > 0 && selectedIds.size === candidates.length}
+                                                onChange={toggleSelectAll}
+                                                className="h-4 w-4 accent-blue-600 rounded" />
+                                            <span className="text-sm font-medium">{selectedIds.size} Selected</span>
+                                        </label>
+                                        <div className="relative">
+                                            <button onClick={() => setShowAddTo(v => !v)}
+                                                className="flex items-center gap-1.5 border border-border rounded px-3 py-1.5 text-sm hover:bg-muted">
+                                                <FileText className="h-3.5 w-3.5" /> Add to <ChevronUp className={`h-3.5 w-3.5 transition-transform ${showAddTo ? '' : 'rotate-180'}`} />
+                                            </button>
+                                            {showAddTo && (
+                                                <div className="absolute top-full left-0 mt-1 z-20 bg-background border border-border rounded shadow-lg w-44">
+                                                    <div className="text-[10px] uppercase text-muted-foreground px-3 pt-2 pb-1 tracking-wide">Actions</div>
+                                                    <button onClick={() => { setShowBulkAssign(true); setShowAddTo(false) }}
+                                                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2">
+                                                        <Briefcase className="h-3.5 w-3.5" /> Assign to position
+                                                    </button>
+                                                    <button onClick={() => { setShowBulkEmail(true); setShowAddTo(false) }}
+                                                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2">
+                                                        <Mail className="h-3.5 w-3.5" /> Send email
+                                                    </button>
+                                                    <button onClick={() => { handleBulkExport(); setShowAddTo(false) }}
+                                                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2">
+                                                        <Download className="h-3.5 w-3.5" /> Export CSV
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button onClick={() => toast.info('Reminder feature coming soon')}
+                                            className="flex items-center gap-1.5 border border-border rounded px-3 py-1.5 text-sm hover:bg-muted">
+                                            <Bell className="h-3.5 w-3.5" /> Remind
+                                        </button>
+                                        <button onClick={() => { setShowBulkEmail(true); clearSelection() }}
+                                            className="flex items-center gap-1.5 border border-border rounded px-3 py-1.5 text-sm hover:bg-muted">
+                                            <Mail className="h-3.5 w-3.5" /> Email all
+                                        </button>
+                                        <button onClick={clearSelection} className="ml-2">
+                                            <X className="h-4 w-4 text-muted-foreground" />
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Candidate cards */}
+                                <div className="space-y-0">
+                                    {displayCandidates.filter((c: any) => !hideProfiles).map((c: any) => {
+                                        const skillsList: string[] = Array.isArray(c.skills) ? c.skills : (c.skills ? String(c.skills).split(',').map((s: string) => s.trim()).filter(Boolean) : [])
+                                        const qualsList: string[] = Array.isArray(c.qualifications) ? c.qualifications : (c.qualifications ? String(c.qualifications).split(',').map((s: string) => s.trim()).filter(Boolean) : [])
+                                        const searchKeywords = (appliedFilters.skills || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+                                        return (
+                                            <div key={c._id} className={`flex gap-4 border-b border-border py-5 ${selectedIds.has(c._id) ? 'bg-blue-50/40 dark:bg-blue-950/10' : 'hover:bg-muted/20'}`}>
+                                                {/* Checkbox */}
+                                                <div className="shrink-0 pt-1" onClick={e => e.stopPropagation()}>
+                                                    <input type="checkbox" checked={selectedIds.has(c._id)} onChange={() => toggleSelect(c._id)}
+                                                        className="h-4 w-4 accent-blue-600 rounded cursor-pointer" />
+                                                </div>
+
+                                                {/* Main content */}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start gap-3 mb-1.5">
+                                                        <Link href={`/candidates/${c._id}`} className="text-[1.0625rem] font-semibold text-blue-700 hover:underline dark:text-blue-400">
+                                                            {c.name}
+                                                        </Link>
+                                                        {c.experience != null && (
+                                                            <span className="text-xs px-2 py-0.5 rounded bg-[#f5f0e8] text-[#7a5c2a] font-medium dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap">
+                                                                {Math.floor(Number(c.experience))}y {Math.round((Number(c.experience) % 1) * 12)}m
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {c.designation && (
+                                                        <p className="text-sm text-muted-foreground mb-2">{c.designation}{c.currentCompany ? ` at ${c.currentCompany}` : ''}</p>
+                                                    )}
+
+                                                    <div className="space-y-1.5 text-sm">
+                                                        {c.currentCompany && (
+                                                            <div className="flex gap-2">
+                                                                <span className="text-muted-foreground w-28 shrink-0">Previous</span>
+                                                                <span>{c.currentCompany}</span>
+                                                            </div>
+                                                        )}
+                                                        {qualsList.length > 0 && (
+                                                            <div className="flex gap-2">
+                                                                <span className="text-muted-foreground w-28 shrink-0">Education</span>
+                                                                <span>{qualsList.join(' | ')}</span>
+                                                            </div>
+                                                        )}
+                                                        {c.location && (
+                                                            <div className="flex gap-2">
+                                                                <span className="text-muted-foreground w-28 shrink-0">Pref. locations</span>
+                                                                <span>{c.location}</span>
+                                                            </div>
+                                                        )}
+                                                        {skillsList.length > 0 && (
+                                                            <div className="flex gap-2">
+                                                                <span className="text-muted-foreground w-28 shrink-0">Key skills</span>
+                                                                <span className="flex-1">
+                                                                    {skillsList.slice(0,10).map((sk, i) => (
+                                                                        <span key={sk}>
+                                                                            {i > 0 && <span className="text-muted-foreground mx-1">|</span>}
+                                                                            <span className={searchKeywords.some(kw => sk.toLowerCase().includes(kw)) ? 'font-semibold text-foreground' : 'text-muted-foreground'}>
+                                                                                {sk}
+                                                                            </span>
+                                                                        </span>
+                                                                    ))}
+                                                                    {skillsList.length > 10 && <button className="text-blue-600 hover:underline ml-1 text-xs">...more</button>}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Bottom row */}
+                                                    <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground flex-wrap">
+                                                        <Link href={`/candidates/${c._id}`} className="text-blue-600 hover:underline">View profile</Link>
+                                                        <span>|</span>
+                                                        <button className="hover:underline">Comment</button>
+                                                        <button className="hover:underline">Save</button>
+                                                        <div className="ml-auto flex items-center gap-3">
+                                                            {c.ctc && <span>CTC: {(Number(c.ctc)/100000).toFixed(1)} L</span>}
+                                                            {c.noticePeriod && <span>Notice: {c.noticePeriod}d</span>}
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${statusColors[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Stats bar */}
+                                                    <div className="flex items-center gap-4 mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground flex-wrap">
+                                                        {c.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {c.email}</span>}
+                                                        {c.phone && (
+                                                            <a href={`tel:${c.countryCode||'+91'}${c.phone}`}
+                                                                className="flex items-center gap-1 hover:text-foreground transition-colors">
+                                                                <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
+                                                            </a>
+                                                        )}
+                                                        {c.updatedAt && (
+                                                            <span className="ml-auto">
+                                                                Active {Math.floor((Date.now()-new Date(c.updatedAt).getTime())/86400000)}d ago
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Right action panel */}
+                                                <div className="shrink-0 flex flex-col items-center gap-2 w-36">
+                                                    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-lg font-semibold text-muted-foreground border border-border">
+                                                        {c.name?.charAt(0)?.toUpperCase()}
+                                                    </div>
+                                                    <Link href={`/candidates/${c._id}`}
+                                                        className="w-full text-center px-3 py-1.5 text-xs border border-border rounded hover:bg-muted transition-colors">
+                                                        View profile
+                                                    </Link>
+                                                    {c.phone && (
+                                                        <a href={`tel:${c.countryCode||'+91'}${c.phone}`}
+                                                            className="w-full text-center px-3 py-1.5 text-xs border border-border rounded hover:bg-muted flex items-center justify-center gap-1.5">
+                                                            <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
+                                                        </a>
+                                                    )}
+                                                    {c.email && (
+                                                        <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1">
+                                                            <Mail className="h-2.5 w-2.5" /> Verified email
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+
+                                {displayCandidates.length === 0 && (
+                                    <div className="text-center py-20 text-muted-foreground text-sm">No candidates found for this search</div>
+                                )}
+
+                                {totalPages > 1 && (
+                                    <div className="flex items-center justify-center gap-2 mt-8">
+                                        <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                                            className="px-3 py-1.5 text-xs border border-border rounded hover:bg-muted disabled:opacity-50">Previous</button>
+                                        <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+                                        <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                                            className="px-3 py-1.5 text-xs border border-border rounded hover:bg-muted disabled:opacity-50">Next</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Create Candidate Modal */}
@@ -481,12 +1108,12 @@ export default function CandidatesPage() {
                             <div className="grid grid-cols-4 gap-4">
                                 <div>
                                     <label className="text-xs font-medium text-muted-foreground">Experience (yrs)</label>
-                                    <input type="number" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })}
+                                    <input type="number" step="any" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })}
                                         className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-muted-foreground">CTC (INR)</label>
-                                    <input type="number" value={form.ctc} onChange={(e) => setForm({ ...form, ctc: e.target.value })}
+                                    <input type="number" step="any" value={form.ctc} onChange={(e) => setForm({ ...form, ctc: e.target.value })}
                                         className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
                                 </div>
                                 <div>

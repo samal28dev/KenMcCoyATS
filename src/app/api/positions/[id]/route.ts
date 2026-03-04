@@ -27,7 +27,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
         // Get candidates attached to this position
         const candidatePositions = await CandidatePosition.find({ positionId: id })
-            .populate('candidateId', 'name email phone status location currentCompany designation')
+            .populate('candidateId', 'name email phone status location currentCompany designation resumeFile resumeFilename')
             .sort({ createdAt: -1 })
             .lean()
 
