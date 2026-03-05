@@ -33,7 +33,9 @@ export async function GET(req: Request) {
         const user = await User.findById(decoded.userId).select('-password -apiKey')
 
         if (!user) {
-            return NextResponse.json({ message: 'Invalid token' }, { status: 401 })
+            const res = NextResponse.json({ message: 'Invalid token' }, { status: 401 })
+            res.cookies.delete('ats_token')
+            return res
         }
 
         return NextResponse.json({
@@ -59,6 +61,8 @@ export async function GET(req: Request) {
             }
         })
     } catch (error) {
-        return NextResponse.json({ message: 'Unauthorized' }, { status: 401 })
+        const res = NextResponse.json({ message: 'Unauthorized' }, { status: 401 })
+        res.cookies.delete('ats_token')
+        return res
     }
 }

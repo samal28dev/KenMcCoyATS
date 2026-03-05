@@ -11,7 +11,11 @@ import { verifyAuth } from '../../../lib/auth'
 export async function GET(req: Request) {
     try {
         const user = await verifyAuth()
-        if (!user) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 })
+        if (!user) {
+            const res = NextResponse.json({ message: 'Unauthorized' }, { status: 401 })
+            res.cookies.delete('ats_token')
+            return res
+        }
 
         await dbConnect()
 

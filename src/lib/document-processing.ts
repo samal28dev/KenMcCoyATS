@@ -139,6 +139,34 @@ export async function addWatermarkToPdf(inputFilename: string): Promise<string> 
             rotate: { type: 'degrees' as any, angle: diagonalAngle },
             opacity: 0.15,
         })
+
+        // ── LOGO WATERMARK (TOP RIGHT) ─────────────────
+        try {
+            const logoPath = path.join(process.cwd(), 'public', 'logo-kmc.jpg')
+            if (fs.existsSync(logoPath)) {
+                const logoBytes = fs.readFileSync(logoPath)
+                const logoImage = await pdfDoc.embedJpg(logoBytes)
+
+                // Desired logo size
+                const logoScale = 0.18
+                const logoWidth = logoImage.width * logoScale
+                const logoHeight = logoImage.height * logoScale
+
+                console.log(`[Watermark] Drawing logo on page sized: ${width}x${height}`)
+                page.drawImage(logoImage, {
+                    x: width - logoWidth - 10,
+                    y: 25, // Adjusted to be above the footer line
+                    width: logoWidth,
+                    height: logoHeight,
+                    opacity: 0.15,
+                })
+                console.log('[Watermark] drawImage called successfully')
+            } else {
+                console.warn('[Watermark] Logo file NOT FOUND at:', logoPath)
+            }
+        } catch (logoErr) {
+            console.error('[Watermark] ERROR embedding logo:', logoErr)
+        }
     }
 
     const outputFilename = `wm_${inputFilename}`
@@ -414,6 +442,36 @@ export async function convertDocxToPdf(inputFilename: string): Promise<string> {
     currentPage.drawText('Ken McCoy Consulting', {
         x: margin, y: 15, size: 7, font, color: rgb(0.5, 0.5, 0.5),
     })
+
+    // ── LOGO WATERMARK (TOP RIGHT) ─────────────────
+    try {
+        const logoPath = path.join(process.cwd(), 'public', 'logo-kmc.jpg')
+        console.log('[Watermark-Docx] Checking logo at:', logoPath)
+        if (fs.existsSync(logoPath)) {
+            console.log('[Watermark-Docx] Logo found, embedding...')
+            const logoBytes = fs.readFileSync(logoPath)
+            const logoImage = await pdfDoc.embedJpg(logoBytes)
+
+            const logoScale = 0.18
+            const logoWidth = logoImage.width * logoScale
+            const logoHeight = logoImage.height * logoScale
+
+            // Draw on every page
+            const pages = pdfDoc.getPages()
+            for (const p of pages) {
+                const { width, height } = p.getSize()
+                p.drawImage(logoImage, {
+                    x: width - logoWidth - 10,
+                    y: 25, // Above footer
+                    width: logoWidth,
+                    height: logoHeight,
+                    opacity: 0.15,
+                })
+            }
+        }
+    } catch (logoErr) {
+        console.warn('[Watermark] Failed to embed logo in converted doc:', logoErr)
+    }
 
     const outputFilename = `converted_${inputFilename.replace(/\.docx?$/i, '.pdf')}`
     const pdfBuf = Buffer.from(await pdfDoc.save())

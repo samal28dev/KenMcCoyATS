@@ -13,7 +13,7 @@ interface DocumentActionsProps {
 
 const actions = {
     resume: [
-        { key: 'watermark', label: 'Add Watermark (KMC)', icon: Stamp, description: 'Header, footer & diagonal watermark' },
+        { key: 'watermark', label: 'Document', icon: Stamp, description: 'Header, footer & diagonal watermark' },
         { key: 'removePii', label: 'Remove PII', icon: Shield, description: 'Strip email & phone numbers' },
         { key: 'convertToDocx', label: 'Convert to DOCX', icon: ArrowRightLeft, description: 'PDF → Word format', pdfOnly: true },
         { key: 'convertToPdf', label: 'Convert to PDF', icon: ArrowRightLeft, description: 'Word → PDF format', docxOnly: true },

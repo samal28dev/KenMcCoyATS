@@ -56,7 +56,7 @@ export default function CandidatesPage() {
         try {
             const stored = localStorage.getItem('candidate_recent_searches')
             if (stored) setRecentSearches(JSON.parse(stored))
-        } catch {}
+        } catch { }
     }, [])
     const [page, setPage] = useState(1)
     const [showCreate, setShowCreate] = useState(false)
@@ -81,6 +81,14 @@ export default function CandidatesPage() {
         qualifications: '', skills: '', resumeFile: '', resumeFilename: '',
         resumePdfVersion: '', resumeDocVersion: '',
     })
+
+    // Bulk upload state
+    const [showBulkUpload, setShowBulkUpload] = useState(false)
+    const [bulkResults, setBulkResults] = useState<any[]>([])
+    const [bulkParsing, setBulkParsing] = useState(false)
+    const [bulkQueue, setBulkQueue] = useState<any[]>([])
+    const [editingBulkId, setEditingBulkId] = useState<string | null>(null)
+    const bulkFileRef = useRef<HTMLInputElement>(null)
 
     const { data } = useQuery({
         queryKey: ['candidates', appliedFilters, page],
@@ -126,9 +134,9 @@ export default function CandidatesPage() {
         // Save to recent searches
         const parts = [
             skillsFilter && `Skills: ${skillsFilter}`,
-            (minExp || maxExp) && `Exp: ${minExp||'0'}-${maxExp||'∞'} yrs`,
+            (minExp || maxExp) && `Exp: ${minExp || '0'}-${maxExp || '∞'} yrs`,
             locationFilter && locationFilter,
-            (minCTC || maxCTC) && `${minCTC||'0'}-${maxCTC||'∞'} Lacs`,
+            (minCTC || maxCTC) && `${minCTC || '0'}-${maxCTC || '∞'} Lacs`,
             noticePeriodPill && `Notice ≤ ${noticePeriodPill}d`,
             designationFilter && designationFilter,
             companyFilter && companyFilter,
@@ -138,7 +146,7 @@ export default function CandidatesPage() {
             const entry = { label, filters }
             setRecentSearches(prev => {
                 const updated = [entry, ...prev.filter(r => r.label !== label)].slice(0, 5)
-                try { localStorage.setItem('candidate_recent_searches', JSON.stringify(updated)) } catch {}
+                try { localStorage.setItem('candidate_recent_searches', JSON.stringify(updated)) } catch { }
                 return updated
             })
         }
@@ -239,7 +247,7 @@ export default function CandidatesPage() {
                 // Try to extract current role/company from experience array as fallback
                 const currentExp = Array.isArray(data.experience)
                     ? data.experience.find((e: any) => /present|current|till\s*date|ongoing|now/i.test(e.endDate || ''))
-                        || data.experience[0]
+                    || data.experience[0]
                     : null
                 const fallbackRole = currentExp?.title || ''
                 const fallbackCompany = currentExp?.company || ''
@@ -282,13 +290,175 @@ export default function CandidatesPage() {
             }
         } catch {
             toast.error('Failed to process resume')
-        } finally {
-            setParsing(false)
         }
+    }
+
+    const handleBulkResumeUpload = async (files: FileList) => {
+        const newFiles = Array.from(files).filter(f => f.size <= MAX_FILE_SIZE)
+        if (newFiles.length < files.length) {
+            toast.error("Some files were skipped because they exceed 10MB")
+        }
+        if (newFiles.length === 0) return
+
+        setBulkParsing(true)
+        const newQueue = newFiles.map(f => ({
+            id: Math.random().toString(36).substring(7),
+            file: f,
+            status: 'pending',
+            progress: 0
+        }))
+        setBulkQueue(prev => [...prev, ...newQueue])
+
+        // Process files one by one or in small batches
+        for (const item of newQueue) {
+            setBulkQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'parsing' } : q))
+            try {
+                // Upload
+                const fd = new FormData()
+                fd.append('file', item.file)
+                fd.append('type', 'resume')
+                const uploadRes = await apiFetch('/api/upload', { method: 'POST', body: fd })
+                if (!uploadRes.ok) throw new Error('Upload failed')
+                const uploadData = await uploadRes.json()
+
+                // Parse
+                const parseFd = new FormData()
+                parseFd.append('file', item.file)
+                const parseRes = await apiFetch('/api/parse-resume', { method: 'POST', body: parseFd })
+                const response = await parseRes.json()
+                const data = response.data
+
+                if (parseRes.ok && data) {
+                    const currentExp = Array.isArray(data.experience)
+                        ? data.experience.find((e: any) => /present|current|till\s*date|ongoing|now/i.test(e.endDate || ''))
+                        || data.experience[0]
+                        : null
+
+                    const parsedCandidate = {
+                        id: item.id,
+                        name: (data.personalInfo?.firstName && data.personalInfo?.lastName)
+                            ? `${data.personalInfo.firstName} ${data.personalInfo.lastName}`
+                            : (data.personalInfo?.firstName || data.name || item.file.name.replace(/\.[^/.]+$/, "")),
+                        email: data.personalInfo?.email || data.email || '',
+                        phone: data.personalInfo?.phone || data.phone || '',
+                        designation: data.currentRole || data.currentDesignation || data.designation || currentExp?.title || '',
+                        currentCompany: data.currentCompany || currentExp?.company || '',
+                        location: data.personalInfo?.location || data.location || '',
+                        experience: data.yearsOfExperience?.toString() || data.experience?.toString() || '',
+                        ctc: data.ctc?.toString() || '',
+                        noticePeriod: data.noticePeriod?.toString() || '',
+                        qualifications: (Array.isArray(data.allQualifications) && data.allQualifications.length > 0)
+                            ? data.allQualifications.join(', ')
+                            : data.qualification || '',
+                        skills: data.skills?.technical
+                            ? [...data.skills.technical, ...(data.skills?.certifications || [])].join(', ')
+                            : (Array.isArray(data.skills) ? data.skills.join(', ') : ''),
+                        resumeFile: uploadData.storageId,
+                        resumeFilename: item.file.name,
+                    }
+                    setBulkResults(prev => [...prev, parsedCandidate])
+                    setBulkQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'done' } : q))
+                } else {
+                    throw new Error('Parsing failed')
+                }
+            } catch (err) {
+                setBulkQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'error' } : q))
+            }
+        }
+        setBulkParsing(false)
+    }
+
+    const handleBulkSave = async () => {
+        if (bulkResults.length === 0) return
+        setParsing(true)
+        let saved = 0
+        for (const c of bulkResults) {
+            try {
+                await apiFetch('/api/candidates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ...c,
+                        experience: c.experience ? Number(c.experience) : undefined,
+                        ctc: c.ctc ? Number(c.ctc) : undefined,
+                        noticePeriod: c.noticePeriod ? Number(c.noticePeriod) : undefined,
+                        qualifications: c.qualifications ? c.qualifications.split(',').map((q: any) => q.trim()).filter(Boolean) : [],
+                        skills: c.skills ? c.skills.split(',').map((s: any) => s.trim()).filter(Boolean) : [],
+                    }),
+                })
+                saved++
+            } catch (err) {
+                console.error("Failed to save", c.name, err)
+            }
+        }
+        toast.success(`Successfully saved ${saved} candidates`)
+        queryClient.invalidateQueries({ queryKey: ['candidates'] })
+        setShowBulkUpload(false)
+        setBulkResults([])
+        setBulkQueue([])
+        setParsing(false)
+    }
+
+    const handleEditBulkCandidate = (c: any) => {
+        setForm({
+            name: c.name || '',
+            email: c.email || '',
+            phone: c.phone || '',
+            alternativeMobile: c.alternativeMobile || '',
+            countryCode: c.countryCode || '+91',
+            alternativeCountryCode: c.alternativeCountryCode || '+91',
+            designation: c.designation || '',
+            currentCompany: c.currentCompany || '',
+            location: c.location || '',
+            experience: c.experience || '',
+            ctc: c.ctc || '',
+            noticePeriod: c.noticePeriod || '',
+            dob: c.dob || '',
+            qualifications: c.qualifications || '',
+            skills: c.skills || '',
+            resumeFile: c.resumeFile || '',
+            resumeFilename: c.resumeFilename || '',
+            resumePdfVersion: c.resumePdfVersion || '',
+            resumeDocVersion: c.resumeDocVersion || '',
+        })
+        setEditingBulkId(c.id)
+        setShowCreate(true)
     }
 
     const handleCreate = (e: React.FormEvent) => {
         e.preventDefault()
+
+        if (editingBulkId) {
+            // Update bulkResults array instead of creating new candidate
+            setBulkResults(prev => prev.map(r => r.id === editingBulkId ? {
+                ...r,
+                name: form.name,
+                email: form.email,
+                phone: form.phone,
+                alternativeMobile: form.alternativeMobile || undefined,
+                countryCode: form.countryCode,
+                alternativeCountryCode: form.alternativeCountryCode,
+                designation: form.designation,
+                currentCompany: form.currentCompany,
+                location: form.location,
+                experience: form.experience,
+                ctc: form.ctc,
+                noticePeriod: form.noticePeriod,
+                dob: form.dob || undefined,
+                qualifications: form.qualifications,
+                skills: form.skills,
+                resumeFile: form.resumeFile || undefined,
+                resumeFilename: form.resumeFilename || undefined,
+                resumePdfVersion: form.resumePdfVersion || undefined,
+                resumeDocVersion: form.resumeDocVersion || undefined,
+            } : r))
+            setShowCreate(false)
+            setEditingBulkId(null)
+            resetForm()
+            toast.success('Candidate details updated in list')
+            return
+        }
+
         createMutation.mutate({
             name: form.name,
             email: form.email,
@@ -430,211 +600,216 @@ export default function CandidatesPage() {
     return (
         <AppShell>
             <div className="min-h-screen bg-background">
-                {!hasSearched && (<>
-                {/* Tab bar */}
-                <div className="border-b border-border bg-background">
-                    <div className="max-w-5xl mx-auto px-6 flex items-center">
-                        <button className="px-0 py-3.5 text-sm font-medium border-b-2 border-primary text-primary mr-8">
-                            Search candidates
-                        </button>
-                        <button onClick={() => setShowCreate(true)} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground">
-                            Add Candidate
-                        </button>
-                    </div>
-                </div>
-
-                {/* Two columns */}
-                <div className="max-w-5xl mx-auto px-6 pt-8 pb-6 flex gap-12">
-
-                    {/* LEFT: Search form */}
-                    <div className="flex-1">
-                        <h1 className="text-[1.875rem] font-bold mb-7">Search candidates</h1>
-
-                        {/* Keywords */}
-                        <div className="mb-5">
-                            <label className="text-sm font-medium mb-1.5 block">Keywords</label>
-                            <input
-                                value={skillsFilter}
-                                onChange={(e) => setSkillsFilter(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                placeholder="Enter keywords like skills, designation and company"
-                                className="w-full px-4 py-3 text-sm border border-border rounded focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
-                            />
-                        </div>
-
-                        {/* Experience */}
-                        <div className="mb-5">
-                            <label className="text-sm font-medium mb-2.5 block">Experience</label>
-                            <div className="flex items-center gap-3">
-                                <input type="number" value={minExp} onChange={(e) => setMinExp(e.target.value)}
-                                    placeholder="Min experience" min="0" step="0.5"
-                                    className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                <span className="text-sm text-muted-foreground">to</span>
-                                <input type="number" value={maxExp} onChange={(e) => setMaxExp(e.target.value)}
-                                    placeholder="Max experience" min="0" step="0.5"
-                                    className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                <span className="text-sm text-muted-foreground">Years</span>
-                            </div>
-                        </div>
-
-                        {/* Location */}
-                        <div className="mb-5">
-                            <label className="text-sm font-medium mb-2.5 block">Current location of candidate</label>
-                            <input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}
-                                placeholder="Add location"
-                                className="w-full px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                        </div>
-
-                        {/* Annual Salary */}
-                        <div className="mb-6">
-                            <label className="text-sm font-medium mb-2.5 block">Annual Salary</label>
-                            <div className="flex items-center gap-3">
-                                <span className="text-sm text-muted-foreground border border-border rounded px-3 py-2.5 bg-muted/40 shrink-0">INR</span>
-                                <input type="number" value={minCTC} onChange={(e) => setMinCTC(e.target.value)}
-                                    placeholder="Min salary" min="0"
-                                    className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                <span className="text-sm text-muted-foreground">to</span>
-                                <input type="number" value={maxCTC} onChange={(e) => setMaxCTC(e.target.value)}
-                                    placeholder="Max salary" min="0"
-                                    className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                <span className="text-sm text-muted-foreground">Lacs</span>
-                            </div>
-                        </div>
-
-                        {/* Employment Details */}
-                        <div className="border-t border-border pt-5 mb-4">
-                            <button onClick={() => setShowEmployment(v => !v)}
-                                className="w-full flex items-center justify-between text-left mb-0.5">
-                                <h2 className="text-[0.9375rem] font-semibold">Employment Details</h2>
-                                <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEmployment ? '' : 'rotate-180'}`} />
-                            </button>
-                            {showEmployment && (
-                                <div className="mt-5 space-y-4">
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-1.5 block">Industry</label>
-                                        <input value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}
-                                            placeholder="Add industry"
-                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-1.5 block">Company</label>
-                                        <input value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
-                                            placeholder="Add company name"
-                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-1.5 block">Designation</label>
-                                        <input value={designationFilter} onChange={(e) => setDesignationFilter(e.target.value)}
-                                            placeholder="Add designation"
-                                            className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-2 block">Notice Period / Availability to join ⓘ</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {[
-                                                { label: 'Any', value: '' },
-                                                { label: '0 - 15 days', value: '15' },
-                                                { label: '1 month', value: '30' },
-                                                { label: '2 months', value: '60' },
-                                                { label: '3 months', value: '90' },
-                                                { label: 'More than 3 months', value: '999' },
-                                            ].map(opt => (
-                                                <button key={opt.value}
-                                                    onClick={() => setNoticePeriodPill(noticePeriodPill === opt.value ? '' : opt.value)}
-                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${(noticePeriodPill === opt.value) || (opt.value === '' && noticePeriodPill === '') ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
-                                                    {opt.label}{noticePeriodPill === opt.value && opt.value !== '' ? ' ×' : ' +'}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Education Details */}
-                        <div className="border-t border-border pt-5 mb-8">
-                            <button onClick={() => setShowEducation(v => !v)}
-                                className="w-full flex items-center justify-between text-left mb-0.5">
-                                <h2 className="text-[0.9375rem] font-semibold">Education Details</h2>
-                                <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEducation ? '' : 'rotate-180'}`} />
-                            </button>
-                            {showEducation && (
-                                <div className="mt-5 space-y-4">
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-2 block">UG Qualification</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {['Any UG qualification', 'Specific UG qualification', 'No UG qualification'].map(opt => (
-                                                <button key={opt} onClick={() => setUgQual(ugQual === opt ? '' : opt)}
-                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${ugQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
-                                                    {opt}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground mb-2 block">PG Qualification</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {['Any PG qualification', 'Specific PG qualification', 'No PG qualification'].map(opt => (
-                                                <button key={opt} onClick={() => setPgQual(pgQual === opt ? '' : opt)}
-                                                    className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${pgQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
-                                                    {opt}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Bottom row: Active in + Search button */}
-                        <div className="flex items-center justify-between border-t border-border pt-4">
-                            <div className="relative">
-                                <button onClick={() => setShowActiveInDrop(v => !v)}
-                                    className="text-sm text-muted-foreground flex items-center gap-1.5 border border-border rounded px-3 py-2 hover:bg-muted/40">
-                                    Active in — <span className="font-medium">{activeIn}</span>
-                                    <ChevronUp className={`h-3.5 w-3.5 ml-0.5 transition-transform ${showActiveInDrop ? '' : 'rotate-180'}`} />
+                {!hasSearched && (
+                    <>
+                        {/* Tab bar */}
+                        <div className="border-b border-border bg-background">
+                            <div className="max-w-5xl mx-auto px-6 flex items-center">
+                                <button className="px-0 py-3.5 text-sm font-medium border-b-2 border-primary text-primary mr-8">
+                                    Search candidates
                                 </button>
-                                {showActiveInDrop && (
-                                    <div className="absolute bottom-full left-0 mb-1 z-20 bg-background border border-border rounded shadow-lg w-40">
-                                        {['1 month', '3 months', '6 months', '1 year', 'Any'].map(opt => (
-                                            <button key={opt} onClick={() => { setActiveIn(opt); setShowActiveInDrop(false) }}
-                                                className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${activeIn === opt ? 'font-semibold text-blue-600' : ''}`}>
-                                                {opt}
-                                            </button>
+                                <button onClick={() => { setEditingBulkId(null); resetForm(); setShowCreate(true) }} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground mr-8">
+                                    Add Candidate
+                                </button>
+                                <button onClick={() => setShowBulkUpload(true)} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground">
+                                    Bulk Upload
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Two columns */}
+                        <div className="max-w-5xl mx-auto px-6 pt-8 pb-6 flex gap-12">
+
+                            {/* LEFT: Search form */}
+                            <div className="flex-1">
+                                <h1 className="text-[1.875rem] font-bold mb-7">Search candidates</h1>
+
+                                {/* Keywords */}
+                                <div className="mb-5">
+                                    <label className="text-sm font-medium mb-1.5 block">Keywords</label>
+                                    <input
+                                        value={skillsFilter}
+                                        onChange={(e) => setSkillsFilter(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                        placeholder="Enter keywords like skills, designation and company"
+                                        className="w-full px-4 py-3 text-sm border border-border rounded focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                                    />
+                                </div>
+
+                                {/* Experience */}
+                                <div className="mb-5">
+                                    <label className="text-sm font-medium mb-2.5 block">Experience</label>
+                                    <div className="flex items-center gap-3">
+                                        <input type="number" value={minExp} onChange={(e) => setMinExp(e.target.value)}
+                                            placeholder="Min experience" min="0" step="0.5"
+                                            className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        <span className="text-sm text-muted-foreground">to</span>
+                                        <input type="number" value={maxExp} onChange={(e) => setMaxExp(e.target.value)}
+                                            placeholder="Max experience" min="0" step="0.5"
+                                            className="w-44 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        <span className="text-sm text-muted-foreground">Years</span>
+                                    </div>
+                                </div>
+
+                                {/* Location */}
+                                <div className="mb-5">
+                                    <label className="text-sm font-medium mb-2.5 block">Current location of candidate</label>
+                                    <input value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}
+                                        placeholder="Add location"
+                                        className="w-full px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                </div>
+
+                                {/* Annual Salary */}
+                                <div className="mb-6">
+                                    <label className="text-sm font-medium mb-2.5 block">Annual Salary</label>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-sm text-muted-foreground border border-border rounded px-3 py-2.5 bg-muted/40 shrink-0">INR</span>
+                                        <input type="number" value={minCTC} onChange={(e) => setMinCTC(e.target.value)}
+                                            placeholder="Min salary" min="0"
+                                            className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        <span className="text-sm text-muted-foreground">to</span>
+                                        <input type="number" value={maxCTC} onChange={(e) => setMaxCTC(e.target.value)}
+                                            placeholder="Max salary" min="0"
+                                            className="w-36 px-4 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        <span className="text-sm text-muted-foreground">Lacs</span>
+                                    </div>
+                                </div>
+
+                                {/* Employment Details */}
+                                <div className="border-t border-border pt-5 mb-4">
+                                    <button onClick={() => setShowEmployment(v => !v)}
+                                        className="w-full flex items-center justify-between text-left mb-0.5">
+                                        <h2 className="text-[0.9375rem] font-semibold">Employment Details</h2>
+                                        <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEmployment ? '' : 'rotate-180'}`} />
+                                    </button>
+                                    {showEmployment && (
+                                        <div className="mt-5 space-y-4">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-1.5 block">Industry</label>
+                                                <input value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}
+                                                    placeholder="Add industry"
+                                                    className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-1.5 block">Company</label>
+                                                <input value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
+                                                    placeholder="Add company name"
+                                                    className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-1.5 block">Designation</label>
+                                                <input value={designationFilter} onChange={(e) => setDesignationFilter(e.target.value)}
+                                                    placeholder="Add designation"
+                                                    className="w-full px-3 py-2.5 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-2 block">Notice Period / Availability to join ⓘ</label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {[
+                                                        { label: 'Any', value: '' },
+                                                        { label: '0 - 15 days', value: '15' },
+                                                        { label: '1 month', value: '30' },
+                                                        { label: '2 months', value: '60' },
+                                                        { label: '3 months', value: '90' },
+                                                        { label: 'More than 3 months', value: '999' },
+                                                    ].map(opt => (
+                                                        <button key={opt.value}
+                                                            onClick={() => setNoticePeriodPill(noticePeriodPill === opt.value ? '' : opt.value)}
+                                                            className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${(noticePeriodPill === opt.value) || (opt.value === '' && noticePeriodPill === '') ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                            {opt.label}{noticePeriodPill === opt.value && opt.value !== '' ? ' ×' : ' +'}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Education Details */}
+                                <div className="border-t border-border pt-5 mb-8">
+                                    <button onClick={() => setShowEducation(v => !v)}
+                                        className="w-full flex items-center justify-between text-left mb-0.5">
+                                        <h2 className="text-[0.9375rem] font-semibold">Education Details</h2>
+                                        <ChevronUp className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${showEducation ? '' : 'rotate-180'}`} />
+                                    </button>
+                                    {showEducation && (
+                                        <div className="mt-5 space-y-4">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-2 block">UG Qualification</label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {['Any UG qualification', 'Specific UG qualification', 'No UG qualification'].map(opt => (
+                                                        <button key={opt} onClick={() => setUgQual(ugQual === opt ? '' : opt)}
+                                                            className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${ugQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                            {opt}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground mb-2 block">PG Qualification</label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {['Any PG qualification', 'Specific PG qualification', 'No PG qualification'].map(opt => (
+                                                        <button key={opt} onClick={() => setPgQual(pgQual === opt ? '' : opt)}
+                                                            className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${pgQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
+                                                            {opt}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Bottom row: Active in + Search button */}
+                                <div className="flex items-center justify-between border-t border-border pt-4">
+                                    <div className="relative">
+                                        <button onClick={() => setShowActiveInDrop(v => !v)}
+                                            className="text-sm text-muted-foreground flex items-center gap-1.5 border border-border rounded px-3 py-2 hover:bg-muted/40">
+                                            Active in — <span className="font-medium">{activeIn}</span>
+                                            <ChevronUp className={`h-3.5 w-3.5 ml-0.5 transition-transform ${showActiveInDrop ? '' : 'rotate-180'}`} />
+                                        </button>
+                                        {showActiveInDrop && (
+                                            <div className="absolute bottom-full left-0 mb-1 z-20 bg-background border border-border rounded shadow-lg w-40">
+                                                {['1 month', '3 months', '6 months', '1 year', 'Any'].map(opt => (
+                                                    <button key={opt} onClick={() => { setActiveIn(opt); setShowActiveInDrop(false) }}
+                                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${activeIn === opt ? 'font-semibold text-blue-600' : ''}`}>
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button onClick={handleSearch}
+                                        className="px-8 py-2.5 bg-[#4A90D9] hover:bg-[#3a80c9] text-white rounded font-medium text-sm transition-colors">
+                                        Search candidates
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* RIGHT: Recent Searches */}
+                            <div className="w-64 shrink-0 pt-1">
+                                <h2 className="text-base font-semibold flex items-center gap-2 mb-5">
+                                    <Clock className="h-4 w-4" /> Recent Searches
+                                </h2>
+                                {recentSearches.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">No recent searches</p>
+                                ) : (
+                                    <div className="space-y-5">
+                                        {recentSearches.map((s: any, i: number) => (
+                                            <div key={i} className="border-b border-border pb-5">
+                                                <p className="text-sm mb-2 leading-snug">{s.label}</p>
+                                                <div className="flex gap-3">
+                                                    <button onClick={() => fillSearch(s)} className="text-xs text-blue-600 hover:underline">Fill this search</button>
+                                                    <button onClick={() => { fillSearch(s); handleSearch() }} className="text-xs text-blue-600 hover:underline">Search profiles</button>
+                                                </div>
+                                            </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                            <button onClick={handleSearch}
-                                className="px-8 py-2.5 bg-[#4A90D9] hover:bg-[#3a80c9] text-white rounded font-medium text-sm transition-colors">
-                                Search candidates
-                            </button>
                         </div>
-                    </div>
-
-                    {/* RIGHT: Recent Searches */}
-                    <div className="w-64 shrink-0 pt-1">
-                        <h2 className="text-base font-semibold flex items-center gap-2 mb-5">
-                            <Clock className="h-4 w-4" /> Recent Searches
-                        </h2>
-                        {recentSearches.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">No recent searches</p>
-                        ) : (
-                            <div className="space-y-5">
-                                {recentSearches.map((s: any, i: number) => (
-                                    <div key={i} className="border-b border-border pb-5">
-                                        <p className="text-sm mb-2 leading-snug">{s.label}</p>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => fillSearch(s)} className="text-xs text-blue-600 hover:underline">Fill this search</button>
-                                            <button onClick={() => { fillSearch(s); handleSearch() }} className="text-xs text-blue-600 hover:underline">Search profiles</button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-                </>)}
+                    </>
+                )}
 
                 {/* RESULTS — shown after search */}
                 {hasSearched && (
@@ -680,10 +855,10 @@ export default function CandidatesPage() {
                                             {appliedFilters.skills && appliedFilters.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => (
                                                 <span key={s} className="flex items-center gap-1 text-xs px-2 py-0.5 border border-border rounded">
                                                     {s.toUpperCase()}
-                                                    <button onClick={() => { const u = appliedFilters.skills.split(',').map((x:string)=>x.trim()).filter((x:string)=>x!==s).join(', '); setSkillsFilter(u); setAppliedFilters(f=>({...f,skills:u})) }}>×</button>
+                                                    <button onClick={() => { const u = appliedFilters.skills.split(',').map((x: string) => x.trim()).filter((x: string) => x !== s).join(', '); setSkillsFilter(u); setAppliedFilters(f => ({ ...f, skills: u })) }}>×</button>
                                                 </span>
                                             ))}
-                                            {appliedFilters.location && <span className="flex items-center gap-1 text-xs px-2 py-0.5 border border-border rounded">{appliedFilters.location} <button onClick={()=>{setLocationFilter('');setAppliedFilters(f=>({...f,location:''}))}} >×</button></span>}
+                                            {appliedFilters.location && <span className="flex items-center gap-1 text-xs px-2 py-0.5 border border-border rounded">{appliedFilters.location} <button onClick={() => { setLocationFilter(''); setAppliedFilters(f => ({ ...f, location: '' })) }} >×</button></span>}
                                         </div>
                                     </div>
                                 )}
@@ -694,73 +869,97 @@ export default function CandidatesPage() {
                                 </label>
 
                                 {[
-                                    { label: 'Keywords', key: 'keywords', content: (
-                                        <div className="relative mt-2">
-                                            <input value={keywordInResults} onChange={e => setKeywordInResults(e.target.value)}
-                                                placeholder="Search keyword"
-                                                className="w-full pl-3 pr-8 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                            <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                                        </div>
-                                    )},
-                                    { label: 'Current company', key: 'company', content: (
-                                        <input value={companyFilter} onChange={e => setCompanyFilter(e.target.value)}
-                                            placeholder="Add company" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Location', key: 'location', content: (
-                                        <input value={locationFilter} onChange={e => setLocationFilter(e.target.value)}
-                                            placeholder="Add location" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Experience (Years)', key: 'exp', content: (
-                                        <div className="flex items-center gap-2 mt-2">
-                                            <input type="number" value={minExp} onChange={e => setMinExp(e.target.value)} placeholder="Min"
-                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                            <span className="text-sm text-muted-foreground shrink-0">to</span>
-                                            <input type="number" value={maxExp} onChange={e => setMaxExp(e.target.value)} placeholder="Max"
-                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                        </div>
-                                    )},
-                                    { label: 'Salary (INR-Lacs)', key: 'salary', content: (
-                                        <div className="flex items-center gap-2 mt-2">
-                                            <input type="number" value={minCTC} onChange={e => setMinCTC(e.target.value)} placeholder="Min"
-                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                            <span className="text-sm text-muted-foreground shrink-0">to</span>
-                                            <input type="number" value={maxCTC} onChange={e => setMaxCTC(e.target.value)} placeholder="Max"
-                                                className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                        </div>
-                                    )},
-                                    { label: 'Current designation', key: 'desig', content: (
-                                        <input value={designationFilter} onChange={e => setDesignationFilter(e.target.value)}
-                                            placeholder="Add designation" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Department and Role', key: 'dept', content: (
-                                        <input value={deptRoleFilter} onChange={e => setDeptRoleFilter(e.target.value)}
-                                            placeholder="Add department or role" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Industry', key: 'industry', content: (
-                                        <input value={industryFilter} onChange={e => setIndustryFilter(e.target.value)}
-                                            placeholder="Add industry" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Notice period', key: 'notice', content: (
-                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                            {[{l:'Any',v:''},{l:'0-15 days',v:'15'},{l:'1 month',v:'30'},{l:'2 months',v:'60'},{l:'3 months',v:'90'},{l:'>3 months',v:'999'}].map(o=>(
-                                                <button key={o.v} onClick={()=>setNoticePeriodPill(o.v)}
-                                                    className={`px-3 py-1 text-xs border rounded-full ${noticePeriodPill===o.v ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border hover:border-blue-300'}`}>{o.l}</button>
-                                            ))}
-                                        </div>
-                                    )},
-                                    { label: 'Degree/Course', key: 'degree', content: (
-                                        <input value={degreeFilter} onChange={e => setDegreeFilter(e.target.value)}
-                                            placeholder="e.g. B.Tech, MBA" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'College name', key: 'college', content: (
-                                        <input value={collegeFilter} onChange={e => setCollegeFilter(e.target.value)}
-                                            placeholder="Add college name" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
-                                    { label: 'Year of degree completion', key: 'gradyr', content: (
-                                        <input type="number" value={gradYearFilter} onChange={e => setGradYearFilter(e.target.value)}
-                                            placeholder="e.g. 2020" min="1980" max="2030"
-                                            className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
-                                    )},
+                                    {
+                                        label: 'Keywords', key: 'keywords', content: (
+                                            <div className="relative mt-2">
+                                                <input value={keywordInResults} onChange={e => setKeywordInResults(e.target.value)}
+                                                    placeholder="Search keyword"
+                                                    className="w-full pl-3 pr-8 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                                <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                            </div>
+                                        )
+                                    },
+                                    {
+                                        label: 'Current company', key: 'company', content: (
+                                            <input value={companyFilter} onChange={e => setCompanyFilter(e.target.value)}
+                                                placeholder="Add company" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Location', key: 'location', content: (
+                                            <input value={locationFilter} onChange={e => setLocationFilter(e.target.value)}
+                                                placeholder="Add location" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Experience (Years)', key: 'exp', content: (
+                                            <div className="flex items-center gap-2 mt-2">
+                                                <input type="number" value={minExp} onChange={e => setMinExp(e.target.value)} placeholder="Min"
+                                                    className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                                <span className="text-sm text-muted-foreground shrink-0">to</span>
+                                                <input type="number" value={maxExp} onChange={e => setMaxExp(e.target.value)} placeholder="Max"
+                                                    className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            </div>
+                                        )
+                                    },
+                                    {
+                                        label: 'Salary (INR-Lacs)', key: 'salary', content: (
+                                            <div className="flex items-center gap-2 mt-2">
+                                                <input type="number" value={minCTC} onChange={e => setMinCTC(e.target.value)} placeholder="Min"
+                                                    className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                                <span className="text-sm text-muted-foreground shrink-0">to</span>
+                                                <input type="number" value={maxCTC} onChange={e => setMaxCTC(e.target.value)} placeholder="Max"
+                                                    className="w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                            </div>
+                                        )
+                                    },
+                                    {
+                                        label: 'Current designation', key: 'desig', content: (
+                                            <input value={designationFilter} onChange={e => setDesignationFilter(e.target.value)}
+                                                placeholder="Add designation" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Department and Role', key: 'dept', content: (
+                                            <input value={deptRoleFilter} onChange={e => setDeptRoleFilter(e.target.value)}
+                                                placeholder="Add department or role" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Industry', key: 'industry', content: (
+                                            <input value={industryFilter} onChange={e => setIndustryFilter(e.target.value)}
+                                                placeholder="Add industry" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Notice period', key: 'notice', content: (
+                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                {[{ l: 'Any', v: '' }, { l: '0-15 days', v: '15' }, { l: '1 month', v: '30' }, { l: '2 months', v: '60' }, { l: '3 months', v: '90' }, { l: '>3 months', v: '999' }].map(o => (
+                                                    <button key={o.v} onClick={() => setNoticePeriodPill(o.v)}
+                                                        className={`px-3 py-1 text-xs border rounded-full ${noticePeriodPill === o.v ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border hover:border-blue-300'}`}>{o.l}</button>
+                                                ))}
+                                            </div>
+                                        )
+                                    },
+                                    {
+                                        label: 'Degree/Course', key: 'degree', content: (
+                                            <input value={degreeFilter} onChange={e => setDegreeFilter(e.target.value)}
+                                                placeholder="e.g. B.Tech, MBA" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'College name', key: 'college', content: (
+                                            <input value={collegeFilter} onChange={e => setCollegeFilter(e.target.value)}
+                                                placeholder="Add college name" className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
+                                    {
+                                        label: 'Year of degree completion', key: 'gradyr', content: (
+                                            <input type="number" value={gradYearFilter} onChange={e => setGradYearFilter(e.target.value)}
+                                                placeholder="e.g. 2020" min="1980" max="2030"
+                                                className="w-full mt-2 px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                        )
+                                    },
                                 ].map(({ label, key, content }) => (
                                     <div key={key} className="border-b border-border">
                                         <button onClick={() => toggleSection(key)}
@@ -824,7 +1023,7 @@ export default function CandidatesPage() {
                                         <div className="flex items-center gap-1 border border-border rounded">
                                             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
                                                 className="px-2 py-1.5 hover:bg-muted disabled:opacity-40 text-base leading-none">&lsaquo;</button>
-                                            <span className="px-2 text-xs text-muted-foreground">{page}/{Math.max(1,totalPages)}</span>
+                                            <span className="px-2 text-xs text-muted-foreground">{page}/{Math.max(1, totalPages)}</span>
                                             <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
                                                 className="px-2 py-1.5 hover:bg-muted disabled:opacity-40 text-base leading-none">&rsaquo;</button>
                                         </div>
@@ -931,7 +1130,7 @@ export default function CandidatesPage() {
                                                             <div className="flex gap-2">
                                                                 <span className="text-muted-foreground w-28 shrink-0">Key skills</span>
                                                                 <span className="flex-1">
-                                                                    {skillsList.slice(0,10).map((sk, i) => (
+                                                                    {skillsList.slice(0, 10).map((sk, i) => (
                                                                         <span key={sk}>
                                                                             {i > 0 && <span className="text-muted-foreground mx-1">|</span>}
                                                                             <span className={searchKeywords.some(kw => sk.toLowerCase().includes(kw)) ? 'font-semibold text-foreground' : 'text-muted-foreground'}>
@@ -952,7 +1151,7 @@ export default function CandidatesPage() {
                                                         <button className="hover:underline">Comment</button>
                                                         <button className="hover:underline">Save</button>
                                                         <div className="ml-auto flex items-center gap-3">
-                                                            {c.ctc && <span>CTC: {(Number(c.ctc)/100000).toFixed(1)} L</span>}
+                                                            {c.ctc && <span>CTC: {(Number(c.ctc) / 100000).toFixed(1)} L</span>}
                                                             {c.noticePeriod && <span>Notice: {c.noticePeriod}d</span>}
                                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${statusColors[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span>
                                                         </div>
@@ -962,14 +1161,14 @@ export default function CandidatesPage() {
                                                     <div className="flex items-center gap-4 mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground flex-wrap">
                                                         {c.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {c.email}</span>}
                                                         {c.phone && (
-                                                            <a href={`tel:${c.countryCode||'+91'}${c.phone}`}
+                                                            <a href={`tel:${c.countryCode || '+91'}${c.phone}`}
                                                                 className="flex items-center gap-1 hover:text-foreground transition-colors">
                                                                 <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
                                                             </a>
                                                         )}
                                                         {c.updatedAt && (
                                                             <span className="ml-auto">
-                                                                Active {Math.floor((Date.now()-new Date(c.updatedAt).getTime())/86400000)}d ago
+                                                                Active {Math.floor((Date.now() - new Date(c.updatedAt).getTime()) / 86400000)}d ago
                                                             </span>
                                                         )}
                                                     </div>
@@ -985,7 +1184,7 @@ export default function CandidatesPage() {
                                                         View profile
                                                     </Link>
                                                     {c.phone && (
-                                                        <a href={`tel:${c.countryCode||'+91'}${c.phone}`}
+                                                        <a href={`tel:${c.countryCode || '+91'}${c.phone}`}
                                                             className="w-full text-center px-3 py-1.5 text-xs border border-border rounded hover:bg-muted flex items-center justify-center gap-1.5">
                                                             <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
                                                         </a>
@@ -1018,249 +1217,382 @@ export default function CandidatesPage() {
                         </div>
                     </div>
                 )}
-            </div>
 
-            {/* Create Candidate Modal */}
-            {showCreate && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-2xl m-4 max-h-[90vh] flex flex-col">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                            <h2 className="text-sm font-semibold">Add New Candidate</h2>
-                            <button onClick={() => { setShowCreate(false); resetForm() }} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
+
+                {/* Bulk Upload Modal */}
+                {showBulkUpload && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                        <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-4xl m-4 max-h-[90vh] flex flex-col">
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                                <h2 className="text-sm font-semibold">Bulk Upload Resumes</h2>
+                                <button onClick={() => { setShowBulkUpload(false); setBulkQueue([]); setBulkResults([]) }} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
+                            </div>
+
+                            <div className="flex-1 overflow-hidden flex flex-col p-5">
+                                {bulkResults.length === 0 && !bulkParsing && (
+                                    <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl p-10 bg-muted/20">
+                                        <input ref={bulkFileRef} type="file" multiple accept=".pdf,.doc,.docx,.txt"
+                                            onChange={(e) => { if (e.target.files) handleBulkResumeUpload(e.target.files) }} className="hidden" />
+                                        <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-4">
+                                            <Upload className="h-8 w-8 text-blue-500" />
+                                        </div>
+                                        <h3 className="text-base font-medium mb-1">Select multiple resumes to parse</h3>
+                                        <p className="text-sm text-muted-foreground mb-6 text-center max-w-xs">Upload up to 50 resumes at once. We'll extract all details automatically.</p>
+                                        <button onClick={() => bulkFileRef.current?.click()}
+                                            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+                                            Choose Files
+                                        </button>
+                                    </div>
+                                )}
+
+                                {(bulkQueue.length > 0) && (
+                                    <div className="flex-1 flex flex-col overflow-hidden">
+                                        {/* Progress Section */}
+                                        {bulkParsing && (
+                                            <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg flex items-center gap-4">
+                                                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Parsing resumes...</p>
+                                                    <p className="text-xs text-blue-700 dark:text-blue-300">Done: {bulkResults.length} / Total: {bulkQueue.length}</p>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Results Scroller */}
+                                        <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
+                                            <div className="flex gap-4 h-full min-h-[400px]">
+                                                {bulkQueue.map((item) => {
+                                                    const result = bulkResults.find(r => r.id === item.id)
+                                                    return (
+                                                        <div key={item.id}
+                                                            onClick={() => result && handleEditBulkCandidate(result)}
+                                                            className="w-80 shrink-0 border border-border rounded-xl bg-background flex flex-col shadow-sm cursor-pointer hover:border-blue-400 transition-colors group">
+                                                            <div className="p-3 border-b border-border bg-muted/30 flex items-center justify-between">
+                                                                <span className="text-xs font-medium truncate max-w-[180px] group-hover:text-blue-600 transition-colors">{item.file.name}</span>
+                                                                {item.status === 'parsing' && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                                                                {item.status === 'done' && <div className="h-2 w-2 rounded-full bg-green-500" />}
+                                                                {item.status === 'error' && <X className="h-3 w-3 text-red-500" />}
+                                                            </div>
+
+                                                            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                                                {result ? (
+                                                                    <>
+                                                                        <div>
+                                                                            <label className="text-[10px] uppercase text-muted-foreground font-bold">Name</label>
+                                                                            <input value={result.name} onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, name: e.target.value } : r))}
+                                                                                className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] uppercase text-muted-foreground font-bold">Email</label>
+                                                                            <input value={result.email} onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, email: e.target.value } : r))}
+                                                                                className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] uppercase text-muted-foreground font-bold">Role & Company</label>
+                                                                            <input value={result.designation} placeholder="Designation" onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, designation: e.target.value } : r))}
+                                                                                className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                            <input value={result.currentCompany} placeholder="Company" onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, currentCompany: e.target.value } : r))}
+                                                                                className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                        </div>
+                                                                        <div className="grid grid-cols-2 gap-2">
+                                                                            <div>
+                                                                                <label className="text-[10px] uppercase text-muted-foreground font-bold">Exp (y)</label>
+                                                                                <input value={result.experience} onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, experience: e.target.value } : r))}
+                                                                                    className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                            </div>
+                                                                            <div>
+                                                                                <label className="text-[10px] uppercase text-muted-foreground font-bold">CTC</label>
+                                                                                <input value={result.ctc} onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, ctc: e.target.value } : r))}
+                                                                                    className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[10px] uppercase text-muted-foreground font-bold">Phone</label>
+                                                                            <input value={result.phone} onChange={(e) => setBulkResults(prev => prev.map(r => r.id === item.id ? { ...r, phone: e.target.value } : r))}
+                                                                                className="w-full mt-1 px-2 py-1 text-sm border border-border rounded bg-transparent focus:outline-none focus:border-blue-400" />
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <div className="h-full flex flex-col items-center justify-center opacity-40 grayscale py-20">
+                                                                        <Loader2 className={`h-8 w-8 ${item.status === 'parsing' ? 'animate-spin' : ''}`} />
+                                                                        <p className="mt-2 text-xs">{item.status === 'parsing' ? 'Parsing...' : 'Waiting...'}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+
+                                                {!bulkParsing && (
+                                                    <button onClick={() => bulkFileRef.current?.click()}
+                                                        className="w-20 shrink-0 border-2 border-dashed border-border rounded-xl hover:bg-muted/50 flex flex-col items-center justify-center group transition-colors">
+                                                        <Plus className="h-6 w-6 text-muted-foreground group-hover:text-blue-500 mb-1" />
+                                                        <span className="text-[10px] font-bold uppercase text-muted-foreground group-hover:text-blue-500">More</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-5 flex items-center justify-between border-t border-border pt-5">
+                                            <p className="text-xs text-muted-foreground">{bulkResults.length} profile(s) ready to save</p>
+                                            <div className="flex gap-3">
+                                                <button onClick={() => { setShowBulkUpload(false); setBulkQueue([]); setBulkResults([]) }}
+                                                    className="px-5 py-2 text-sm border border-border rounded-lg hover:bg-muted">Discard All</button>
+                                                <button onClick={handleBulkSave} disabled={bulkResults.length === 0 || bulkParsing}
+                                                    className="px-8 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50">
+                                                    Save All Candidates
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        <form onSubmit={handleCreate} className="flex-1 overflow-y-auto p-5 space-y-4">
-                            {/* Resume Upload */}
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Upload Resume (PDF / DOC / DOCX) — auto-parses fields</label>
-                                <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" onChange={(e) => { if (e.target.files?.[0]) handleResumeUpload(e.target.files[0]) }} className="hidden" />
-                                <button type="button" onClick={() => fileRef.current?.click()} disabled={parsing}
-                                    className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-3 text-sm border border-dashed border-border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-60">
-                                    {parsing ? (
-                                        <><Loader2 className="h-4 w-4 animate-spin" /> Parsing resume...</>
-                                    ) : (
-                                        <><Upload className="h-4 w-4 text-muted-foreground" />
-                                            <span className="text-muted-foreground">{form.resumeFilename || 'Click to upload resume'}</span></>
-                                    )}
-                                </button>
-                            </div>
+                    </div>
+                )}
 
-                            {/* Personal */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Full Name *</label>
-                                    <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" required />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Email *</label>
-                                    <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" required />
-                                </div>
+                {/* Create Candidate Modal */}
+                {showCreate && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                        <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-2xl m-4 max-h-[90vh] flex flex-col">
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                                <h2 className="text-sm font-semibold">{editingBulkId ? 'Edit Candidate Details' : 'Add New Candidate'}</h2>
+                                <button onClick={() => { setShowCreate(false); setEditingBulkId(null); resetForm() }} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-4">
+                            <form onSubmit={handleCreate} className="flex-1 overflow-y-auto p-5 space-y-4">
+                                {/* Resume Upload */}
                                 <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Mobile</label>
-                                    <div className="flex gap-1 mt-1">
-                                        <Select value={form.countryCode} onValueChange={(val) => setForm({ ...form, countryCode: val })}>
-                                            <SelectTrigger className="w-20">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {COUNTRY_CODES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                        <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                                            placeholder="10-digit" className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                    <label className="text-xs font-medium text-muted-foreground">Upload Resume (PDF / DOC / DOCX) — auto-parses fields</label>
+                                    <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" onChange={(e) => { if (e.target.files?.[0]) handleResumeUpload(e.target.files[0]) }} className="hidden" />
+                                    <button type="button" onClick={() => fileRef.current?.click()} disabled={parsing}
+                                        className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-3 text-sm border border-dashed border-border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-60">
+                                        {parsing ? (
+                                            <><Loader2 className="h-4 w-4 animate-spin" /> Parsing resume...</>
+                                        ) : (
+                                            <><Upload className="h-4 w-4 text-muted-foreground" />
+                                                <span className="text-muted-foreground">{form.resumeFilename || 'Click to upload resume'}</span></>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Personal */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Full Name *</label>
+                                        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" required />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Email *</label>
+                                        <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" required />
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Alt Mobile</label>
-                                    <div className="flex gap-1 mt-1">
-                                        <Select value={form.alternativeCountryCode} onValueChange={(val) => setForm({ ...form, alternativeCountryCode: val })}>
-                                            <SelectTrigger className="w-20">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {COUNTRY_CODES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                        <input value={form.alternativeMobile} onChange={(e) => setForm({ ...form, alternativeMobile: e.target.value })}
-                                            placeholder="Alternative" className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Mobile</label>
+                                        <div className="flex gap-1 mt-1">
+                                            <Select value={form.countryCode} onValueChange={(val) => setForm({ ...form, countryCode: val })}>
+                                                <SelectTrigger className="w-20">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {COUNTRY_CODES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                                                placeholder="10-digit" className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Alt Mobile</label>
+                                        <div className="flex gap-1 mt-1">
+                                            <Select value={form.alternativeCountryCode} onValueChange={(val) => setForm({ ...form, alternativeCountryCode: val })}>
+                                                <SelectTrigger className="w-20">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {COUNTRY_CODES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            <input value={form.alternativeMobile} onChange={(e) => setForm({ ...form, alternativeMobile: e.target.value })}
+                                                placeholder="Alternative" className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Professional */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Current Designation</label>
-                                    <input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Current/Last Company</label>
-                                    <input value={form.currentCompany} onChange={(e) => setForm({ ...form, currentCompany: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-4 gap-4">
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Experience (yrs)</label>
-                                    <input type="number" step="any" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">CTC (INR)</label>
-                                    <input type="number" step="any" value={form.ctc} onChange={(e) => setForm({ ...form, ctc: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Notice (days)</label>
-                                    <input type="number" value={form.noticePeriod} onChange={(e) => setForm({ ...form, noticePeriod: e.target.value })}
-                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-medium text-muted-foreground">DOB</label>
-                                    <div className="mt-1">
-                                        <DateInput value={form.dob} onChange={(val) => setForm({ ...form, dob: val })} placeholder="Date of birth" />
+                                {/* Professional */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Current Designation</label>
+                                        <input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Current/Last Company</label>
+                                        <input value={form.currentCompany} onChange={(e) => setForm({ ...form, currentCompany: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" />
                                     </div>
                                 </div>
-                            </div>
 
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Location</label>
-                                <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. Mumbai" />
-                            </div>
+                                <div className="grid grid-cols-4 gap-4">
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Experience (yrs)</label>
+                                        <input type="number" step="any" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">CTC (INR)</label>
+                                        <input type="number" step="any" value={form.ctc} onChange={(e) => setForm({ ...form, ctc: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">Notice (days)</label>
+                                        <input type="number" value={form.noticePeriod} onChange={(e) => setForm({ ...form, noticePeriod: e.target.value })}
+                                            className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" min="0" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-medium text-muted-foreground">DOB</label>
+                                        <div className="mt-1">
+                                            <DateInput value={form.dob} onChange={(val) => setForm({ ...form, dob: val })} placeholder="Date of birth" />
+                                        </div>
+                                    </div>
+                                </div>
 
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Qualifications (comma-separated)</label>
-                                <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. B.Tech, MBA" />
-                            </div>
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Location</label>
+                                    <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })}
+                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. Mumbai" />
+                                </div>
 
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Skills (comma-separated)</label>
-                                <input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. React, Node.js, Python" />
-                            </div>
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Qualifications (comma-separated)</label>
+                                    <input value={form.qualifications} onChange={(e) => setForm({ ...form, qualifications: e.target.value })}
+                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. B.Tech, MBA" />
+                                </div>
 
-                            <div className="flex justify-end gap-2 pt-2">
-                                <button type="button" onClick={() => { setShowCreate(false); resetForm() }}
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Skills (comma-separated)</label>
+                                    <input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })}
+                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="e.g. React, Node.js, Python" />
+                                </div>
+
+                                <div className="flex justify-end gap-2 pt-2">
+                                    <button type="button" onClick={() => { setShowCreate(false); setEditingBulkId(null); resetForm() }}
+                                        className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                                    <button type="submit" disabled={createMutation.isPending}
+                                        className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
+                                        {editingBulkId ? 'Update Details' : (createMutation.isPending ? 'Creating...' : 'Create Candidate')}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Floating Bulk Action Toolbar */}
+                {selectedIds.size > 0 && (
+                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-background border border-border rounded-xl shadow-xl">
+                        <span className="text-xs font-semibold text-primary">{selectedIds.size} selected</span>
+                        <div className="h-4 w-px bg-border" />
+                        <button onClick={() => setShowBulkAssign(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
+                            <Briefcase className="h-3.5 w-3.5" /> Assign Position
+                        </button>
+                        <button onClick={() => setShowBulkEmail(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
+                            <Mail className="h-3.5 w-3.5" /> Send Email
+                        </button>
+                        <button onClick={handleBulkExport}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
+                            <Download className="h-3.5 w-3.5" /> Export CSV
+                        </button>
+                        <div className="h-4 w-px bg-border" />
+                        <button onClick={clearSelection}
+                            className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Clear selection">
+                            <X className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                    </div>
+                )}
+
+                {/* Bulk Assign to Position Modal */}
+                {showBulkAssign && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                        <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-md m-4 p-5">
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-sm font-semibold">Assign {selectedIds.size} Candidate(s) to Position</h2>
+                                <button onClick={() => setShowBulkAssign(false)} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
+                            </div>
+                            <div className="mb-4">
+                                <label className="text-xs font-medium text-muted-foreground">Select Position</label>
+                                <Select value={bulkAssignPositionId || 'none'} onValueChange={(val) => setBulkAssignPositionId(val === 'none' ? '' : val)}>
+                                    <SelectTrigger className="mt-1">
+                                        <SelectValue placeholder="Choose a position..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none" disabled>Choose a position...</SelectItem>
+                                        {positionsList.map((p: any) => (
+                                            <SelectItem key={p._id} value={p._id}>
+                                                {p.title} {p.clientId?.name ? `— ${p.clientId.name}` : ''}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setShowBulkAssign(false)}
                                     className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-                                <button type="submit" disabled={createMutation.isPending}
+                                <button onClick={() => bulkAssignMutation.mutate()}
+                                    disabled={!bulkAssignPositionId || bulkAssignMutation.isPending}
                                     className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
-                                    {createMutation.isPending ? 'Creating...' : 'Create Candidate'}
+                                    {bulkAssignMutation.isPending ? 'Assigning...' : 'Assign'}
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Floating Bulk Action Toolbar */}
-            {selectedIds.size > 0 && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-background border border-border rounded-xl shadow-xl">
-                    <span className="text-xs font-semibold text-primary">{selectedIds.size} selected</span>
-                    <div className="h-4 w-px bg-border" />
-                    <button onClick={() => setShowBulkAssign(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
-                        <Briefcase className="h-3.5 w-3.5" /> Assign Position
-                    </button>
-                    <button onClick={() => setShowBulkEmail(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
-                        <Mail className="h-3.5 w-3.5" /> Send Email
-                    </button>
-                    <button onClick={handleBulkExport}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors">
-                        <Download className="h-3.5 w-3.5" /> Export CSV
-                    </button>
-                    <div className="h-4 w-px bg-border" />
-                    <button onClick={clearSelection}
-                        className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Clear selection">
-                        <X className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                </div>
-            )}
-
-            {/* Bulk Assign to Position Modal */}
-            {showBulkAssign && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-md m-4 p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-sm font-semibold">Assign {selectedIds.size} Candidate(s) to Position</h2>
-                            <button onClick={() => setShowBulkAssign(false)} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
-                        </div>
-                        <div className="mb-4">
-                            <label className="text-xs font-medium text-muted-foreground">Select Position</label>
-                            <Select value={bulkAssignPositionId || 'none'} onValueChange={(val) => setBulkAssignPositionId(val === 'none' ? '' : val)}>
-                                <SelectTrigger className="mt-1">
-                                    <SelectValue placeholder="Choose a position..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none" disabled>Choose a position...</SelectItem>
-                                    {positionsList.map((p: any) => (
-                                        <SelectItem key={p._id} value={p._id}>
-                                            {p.title} {p.clientId?.name ? `— ${p.clientId.name}` : ''}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="flex justify-end gap-2">
-                            <button onClick={() => setShowBulkAssign(false)}
-                                className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-                            <button onClick={() => bulkAssignMutation.mutate()}
-                                disabled={!bulkAssignPositionId || bulkAssignMutation.isPending}
-                                className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
-                                {bulkAssignMutation.isPending ? 'Assigning...' : 'Assign'}
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Bulk Email Modal */}
-            {showBulkEmail && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-lg m-4 p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-sm font-semibold">Email {selectedIds.size} Candidate(s)</h2>
-                            <button onClick={() => setShowBulkEmail(false)} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
-                        </div>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Recipients</label>
-                                <p className="mt-1 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
-                                    {candidates.filter((c: any) => selectedIds.has(c._id)).map((c: any) => c.email).filter(Boolean).join(', ') || 'No emails found'}
-                                </p>
+                {/* Bulk Email Modal */}
+                {showBulkEmail && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                        <div className="bg-background rounded-xl border border-border shadow-xl w-full max-w-lg m-4 p-5">
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-sm font-semibold">Email {selectedIds.size} Candidate(s)</h2>
+                                <button onClick={() => setShowBulkEmail(false)} className="p-1 rounded hover:bg-muted"><X className="h-4 w-4" /></button>
                             </div>
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Subject *</label>
-                                <input value={bulkEmailSubject} onChange={(e) => setBulkEmailSubject(e.target.value)}
-                                    className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="Email subject" />
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Recipients</label>
+                                    <p className="mt-1 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+                                        {candidates.filter((c: any) => selectedIds.has(c._id)).map((c: any) => c.email).filter(Boolean).join(', ') || 'No emails found'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Subject *</label>
+                                    <input value={bulkEmailSubject} onChange={(e) => setBulkEmailSubject(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background" placeholder="Email subject" />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Message *</label>
+                                    <textarea value={bulkEmailContent} onChange={(e) => setBulkEmailContent(e.target.value)}
+                                        rows={6} className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background resize-y" placeholder="Write your message..." />
+                                </div>
                             </div>
-                            <div>
-                                <label className="text-xs font-medium text-muted-foreground">Message *</label>
-                                <textarea value={bulkEmailContent} onChange={(e) => setBulkEmailContent(e.target.value)}
-                                    rows={6} className="w-full mt-1 px-3 py-2 text-sm border border-border rounded-lg bg-background resize-y" placeholder="Write your message..." />
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button onClick={() => setShowBulkEmail(false)}
+                                    className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                                <button onClick={() => bulkEmailMutation.mutate()}
+                                    disabled={!bulkEmailSubject || !bulkEmailContent || bulkEmailMutation.isPending}
+                                    className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5">
+                                    <Mail className="h-3.5 w-3.5" />
+                                    {bulkEmailMutation.isPending ? 'Sending...' : 'Send Email'}
+                                </button>
                             </div>
-                        </div>
-                        <div className="flex justify-end gap-2 mt-4">
-                            <button onClick={() => setShowBulkEmail(false)}
-                                className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-                            <button onClick={() => bulkEmailMutation.mutate()}
-                                disabled={!bulkEmailSubject || !bulkEmailContent || bulkEmailMutation.isPending}
-                                className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5">
-                                <Mail className="h-3.5 w-3.5" />
-                                {bulkEmailMutation.isPending ? 'Sending...' : 'Send Email'}
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
         </AppShell>
     )
 }
