@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
 
     // Parse the resume
     const parser = new ResumeParser(process.env.OPENAI_API_KEY)
-    const parsedResume = await parser.parseResume(resumeText)
+    const parsedResume = await parser.parseResume(resumeText, file.name)
 
     return NextResponse.json({
       success: true,

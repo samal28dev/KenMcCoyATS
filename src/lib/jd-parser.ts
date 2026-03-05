@@ -21,7 +21,8 @@ Return the data in the exact JSON format specified below. Be thorough and accura
 
 JSON Structure:
 {
-  "title": "string - the job title / position name",
+  "_thought_process": "string - FIRST, write a brief paragraph analyzing the entire document. Identify the true job title (ignoring generic template headers like 'Annexure' or 'JD Template'), understand the primary responsibilities, and note where the requirements/skills are located. This step is CRITICAL for accurate extraction.",
+  "title": "string - the ACTUAL job title / position name (derived from your analysis)",
   "description": "string - a concise summary of the role (2-4 sentences). Do NOT copy the entire JD here.",
   "requirements": ["array of individual requirement strings - each should be a separate requirement, e.g., '5+ years of experience in React', 'Strong communication skills', 'MBA preferred'"],
   "minExperience": "number or null - minimum years of experience required",
@@ -42,34 +43,131 @@ Important instructions:
 - Parse single experience mentions: "Minimum 5 years" → minExperience: 5, maxExperience: null
 - Extract all technical skills and tools mentioned throughout the document
 - Identify educational qualifications separately from other requirements
-- Separate responsibilities from requirements — responsibilities describe what the person will DO, requirements describe what they must HAVE
+- REQUIREMENTS: This is CRITICAL. Extract as many specific requirements as possible. Look for sections like "Must Have", "Criteria", "Experience", "Skills", "Eligibility", or even plain bullet points.
+- IMPORTANT: The "title" MUST NOT include any label like "Job Title:", "Role:", "Position:", or even just "Role " at the start. Example: instead of "Role: Web Developer", just return "Web Developer".
+- If the document contains a filename hint, use it to verify the job title.
 - If salary/CTC/compensation is mentioned anywhere, capture it in budget
+- CRITICAL: The extracted text often has stuck words (e.g., "RoleIT", "Reports toHead", "DepartmentIT"). You MUST separate these words in your output (e.g., "Role IT", "Reports to Head").
 - If a field is not found, use null for numbers, empty string for strings, or empty array as appropriate
+- AVOID using section headers like "Job Purpose", "Job Description", or "Job Summary" as the job title.
+- AVOID generic document headers like "Job Description Template", "Annexure I", or "Template" as the job title. Look deeper for the ACTUAL role name.
 `
 
 class JDParser {
     private openai: OpenAI | null = null
 
     constructor(apiKey?: string) {
-        if (apiKey) {
+        // Support Groq if provided via GROQ_API_KEY env or if the apiKey starts with gsk_
+        const groqKey = process.env.GROQ_API_KEY;
+        const finalKey = apiKey || groqKey;
+
+        if (finalKey) {
+            const isGroq = finalKey.startsWith('gsk_') || !!groqKey;
             this.openai = new OpenAI({
-                apiKey,
+                apiKey: finalKey,
+                baseURL: isGroq ? 'https://api.groq.com/openai/v1' : undefined,
                 dangerouslyAllowBrowser: false,
             })
         }
     }
 
-    async parseJD(jdText: string): Promise<ParsedJD> {
+    public static scrub(val: string | undefined | null): string {
+        if (!val) return ''
+        let cleaned = val
+            .replace(/^[\s,.\-–|:•·*□]+|[\s,.\-–|:•·*□]+$/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim()
+
+        // CamelCase Spacing Repair (The Ultimate Deep Fix)
+        // Space between lowercase/digit and Uppercase (e.g., "toHead" -> "to Head", "to15" -> "to 15")
+        cleaned = cleaned.replace(/([a-z\d])([A-Z])/g, '$1 $2')
+
+        // Handle specific stuck common JD labels even if they start with Uppercase
+        cleaned = cleaned.replace(/\b(Role|Department|Title|Position|Location|Reports|Stakeholders|Leads|Employment|Industry|Budget|Summary|Purpose|Qualifications|Requirements)(?=[A-Z\d])/g, '$1 ')
+
+        return cleaned.trim()
+    }
+
+    public static stripPrefix(val: string): string {
+        if (!val) return ''
+        let cleaned = val.trim()
+
+        // Fix stuck Role prefix at the very start (e.g., "RoleIT")
+        cleaned = cleaned.replace(/^Role(?=[A-Z])/i, '')
+
+        // Remove common labels at the start (case-insensitive)
+        const labelPattern = /^(?:job\s*title|position|role|designation|job\s*purpose|job\s*summary|overview|about\s*the\s*role|description|role\s*summary|designation|department|reports\s*to|employment\s*type|industry|budget|qualifications|requirements|stakeholders|leads|direct\s*reports|reporting\s*to|context|level|team|about\s*us)\s*[:\-–\s]*/i
+        cleaned = cleaned.replace(labelPattern, '')
+
+        // Standalone word stripping only if followed by space
+        cleaned = cleaned.replace(/^(?:role|position|title|job|department|reports\s*to|context)\s+/i, '')
+
+        return JDParser.scrub(cleaned)
+    }
+
+    public static isInvalidTitle(val: string | undefined | null): boolean {
+        const scrubbed = JDParser.scrub(val)
+        if (!scrubbed || scrubbed.length < 3) return true
+        const lower = scrubbed.toLowerCase()
+
+        const headers = [
+            'job purpose', 'job description', 'job summary', 'overview', 'about the role',
+            'responsibilities', 'requirements', 'qualifications', 'skills', 'experience',
+            'salary', 'benefits', 'location', 'company profile', 'who we are', 'apply',
+            'how to apply', 'position summary', 'context', 'purpose of the job',
+            'stakeholders', 'leads', 'direct reports', 'reporting to', 'internal application'
+        ]
+
+        // Titles should not be an exact header or start with a common header followed by a separator
+        if (headers.some(h => lower === h || lower.startsWith(`${h}:`) || lower.startsWith(`${h} -`))) return true
+
+        // Reject generic document templates even with weird kerning
+        if (/template|templa\b|annexure|ann\s*exure|appendix|header/i.test(lower)) return true
+
+        // Reject titles that are too long (sentences) or contain multiple commas
+        if (lower.split(/\s+/).length > 8) return true
+        if ((lower.match(/,/g) || []).length > 1) return true
+
+        return false
+    }
+
+    public static isInvalidContent(val: string | undefined | null): boolean {
+        // Very lenient check for content lines (requirements, skills, desc)
+        if (!val) return true
+        const trimmed = val.trim()
+        if (trimmed.length < 2) return true
+
+        const lower = trimmed.toLowerCase()
+        // Only reject if it's EXACTLY one of these headers with nothing else
+        const metaHeaders = [
+            'responsibilities', 'requirements', 'qualifications', 'job description',
+            'overview', 'benefits', 'other details', 'employment type', 'about us',
+            'key skills', 'experience'
+        ]
+
+        // Exact match check (don't scrub first, to preserve actual content)
+        if (metaHeaders.some(h => lower === h || lower === `${h}:`)) {
+            return true
+        }
+
+        return false
+    }
+
+    async parseJD(jdText: string, fileName?: string): Promise<ParsedJD> {
+        const basicResult = this.basicParse(jdText, fileName)
         if (!this.openai) {
-            return this.basicParse(jdText)
+            return basicResult
         }
 
         try {
+            const isGroq = !!process.env.GROQ_API_KEY || (this.openai as any)?.apiKey?.startsWith('gsk_');
+            const model = isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini';
+
             const completion = await this.openai.chat.completions.create({
-                model: 'gpt-4o-mini',
+                model,
                 messages: [
                     { role: 'system', content: JD_PARSING_PROMPT },
-                    { role: 'user', content: `Parse this job description:\n\n${jdText}` },
+                    { role: 'user', content: `FileName: ${fileName || 'unnamed'}. Parse this job description:\n\n${jdText}` },
                 ],
                 temperature: 0.1,
                 response_format: { type: 'json_object' },
@@ -77,19 +175,113 @@ class JDParser {
 
             const result = completion.choices[0]?.message?.content
             if (!result) throw new Error('No response from OpenAI')
-            return JSON.parse(result) as ParsedJD
+
+            // Log raw response for debugging
+            console.log("=== AI RAW OUTPUT ===", result)
+
+            // Strip markdown block if AI includes it
+            let cleanJson = result.trim()
+            const match = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+            if (match && match[1]) {
+                cleanJson = match[1].trim()
+            } else if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+                cleanJson = cleanJson
+            } else {
+                // Try to find first { and last }
+                const first = cleanJson.indexOf('{')
+                const last = cleanJson.lastIndexOf('}')
+                if (first !== -1 && last !== -1) {
+                    cleanJson = cleanJson.substring(first, last + 1)
+                }
+            }
+
+            const aiResult = JSON.parse(cleanJson) as ParsedJD
+
+            // Post-process and merge with basic safeguards
+            return this.cleanAndMerge(aiResult, basicResult, fileName)
         } catch (error) {
             console.error('AI JD parsing failed, falling back to basic parser:', error)
-            return this.basicParse(jdText)
+            return basicResult
         }
     }
 
-    private basicParse(text: string): ParsedJD {
+    private cleanAndMerge(ai: ParsedJD, basic: ParsedJD, fileName?: string): ParsedJD {
+        const pickTitle = (aiVal: string | null | undefined, basicVal: string | null | undefined): string => {
+            const scrubbedAi = JDParser.stripPrefix(aiVal || '')
+            const scrubbedBasic = JDParser.stripPrefix(basicVal || '')
+            return !JDParser.isInvalidTitle(scrubbedAi) ? scrubbedAi : (!JDParser.isInvalidTitle(scrubbedBasic) ? scrubbedBasic : '')
+        }
+
+        const scrubAndValidate = (val: string | null | undefined, isTitle: boolean = false): string => {
+            const scrubbed = isTitle ? JDParser.stripPrefix(val || '') : JDParser.scrub(val)
+            if (isTitle) return JDParser.isInvalidTitle(scrubbed) ? '' : scrubbed
+            return JDParser.isInvalidContent(scrubbed) ? '' : scrubbed
+        }
+
+        const safeArray = (arr: any): string[] => {
+            if (Array.isArray(arr)) return arr.map(String)
+            if (typeof arr === 'string') {
+                // Try splitting by newline or bullet if it's a giant string
+                return arr.split(/\n|•|-|\*|▪|◦|→|\d+\./).map(s => s.trim()).filter(s => s.length > 5)
+            }
+            return []
+        }
+
+        const parseExp = (val: any): number | null => {
+            if (val === null || val === undefined) return null
+            if (typeof val === 'number') return val
+            const parsed = parseInt(String(val).replace(/\D/g, ''))
+            return isNaN(parsed) ? null : parsed
+        }
+
+        // Clean the arrays but DO NOT scrub them aggressively, as scrub removes all labels
+        // and can wipe out perfectly valid single-word requirements like "IT" or "React"
+        const cleanArrayStr = (s: string) => {
+            if (!s) return ''
+            return s.replace(/^[\s\-•*▪◦→\d.)]+/, '').trim()
+        }
+
+        const aiReqs = safeArray(ai.requirements).map(cleanArrayStr).filter(r => !JDParser.isInvalidContent(r))
+        const basicReqs = safeArray(basic.requirements).map(cleanArrayStr).filter(r => !JDParser.isInvalidContent(r))
+        const finalReqs = aiReqs.length > 0 ? aiReqs : basicReqs
+
+        const aiResps = safeArray(ai.responsibilities).map(cleanArrayStr).filter(r => r.length > 5)
+
+        // Merge responsibilities into description intelligently
+        let combinedDescParts = [
+            JDParser.stripPrefix(ai.description) || JDParser.stripPrefix(basic.description),
+            ...aiResps
+        ].filter(s => s && s.length > 5)
+
+        let combinedDesc = combinedDescParts[0] || ''
+        if (combinedDescParts.length > 1) {
+            combinedDesc += '\n\nKey Responsibilities:\n• ' + combinedDescParts.slice(1).join('\n• ')
+        }
+
+        // Final scrub on combined description
+        combinedDesc = JDParser.scrub(combinedDesc)
+
+        return {
+            title: pickTitle(ai.title, basic.title),
+            description: combinedDesc,
+            location: scrubAndValidate(ai.location) || basic.location,
+            budget: JDParser.scrub(ai.budget) || basic.budget,
+            minExperience: parseExp(ai.minExperience) ?? parseExp(basic.minExperience),
+            maxExperience: parseExp(ai.maxExperience) ?? parseExp(basic.maxExperience),
+            requirements: finalReqs,
+            skills: safeArray(ai.skills).map(s => JDParser.scrub(s)).filter(s => s && s.length > 1),
+            qualifications: [...new Set([...safeArray(ai.qualifications), ...safeArray(basic.qualifications)])].map(q => JDParser.scrub(q)).filter(q => q && q.length > 1),
+            responsibilities: [],
+            employmentType: ai.employmentType || basic.employmentType,
+            industry: ai.industry || basic.industry
+        }
+    }
+
+    private basicParse(text: string, fileName?: string): ParsedJD {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l)
         const textLower = text.toLowerCase()
 
         // ── TITLE ──
-        // Usually the first prominent line or after "Job Title:" / "Position:"
         let title = ''
         const titlePatterns = [
             /(?:job\s*title|position|role|designation)\s*[:\-–]\s*(.+)/i,
@@ -97,16 +289,27 @@ class JDParser {
         ]
         for (const pattern of titlePatterns) {
             const match = text.match(pattern)
-            if (match) { title = match[1].trim(); break }
+            if (match && !JDParser.isInvalidTitle(JDParser.stripPrefix(match[1]))) {
+                title = JDParser.stripPrefix(match[1]);
+                break
+            }
         }
         if (!title && lines.length > 0) {
-            // Use the first non-empty, non-company line as a fallback
             for (const line of lines.slice(0, 5)) {
-                if (line.length > 3 && line.length < 100 && !/^(about|company|organization|who we are)/i.test(line)) {
-                    title = line.replace(/^[#*\-\s]+/, '').trim()
+                const stripped = JDParser.stripPrefix(line)
+                if (stripped.length > 3 && stripped.length < 100 && !/^(about|company|organization|who we are)/i.test(stripped) && !JDParser.isInvalidTitle(stripped)) {
+                    title = stripped
                     break
                 }
             }
+        }
+
+        // Strategy 2: Filename recovery
+        if ((!title || JDParser.isInvalidTitle(title)) && fileName) {
+            let namePart = fileName.replace(/\.[^/.]+$/, "")
+            // Strip common "JD" prefixes from filename
+            namePart = namePart.replace(/^(?:jd|job[_\-\s]*description|hiring)[_\-\s]*/i, '')
+            title = JDParser.stripPrefix(namePart)
         }
 
         // ── EXPERIENCE ──
@@ -150,27 +353,42 @@ class JDParser {
             }
         }
 
-        // ── REQUIREMENTS ──
         const requirements: string[] = []
-        const reqSectionMatch = text.match(/(?:requirements?|must\s*have|qualifications?\s*(?:and|\&)\s*requirements?|what\s*(?:you|we)\s*(?:need|require|expect)|eligibility)\s*[:\-–]?\s*\n([\s\S]*?)(?=\n\s*(?:responsibilities|about|benefits|perks|how\s*to|application|salary|compensation|$))/i)
+        // Expanded section matching
+        const reqSectionRegex = /(?:requirements?|must\s*have|qualifications?\s*(?:and|\&)\s*requirements?|what\s*(?:you|we)\s*(?:need|require|expect)|eligibility|criteria|competencies|experience\s*required|key\s*skills)\s*[:\-–]?\s*\n([\s\S]*?)(?=\n\s*(?:responsibilities|about|benefits|perks|how\s*to|application|salary|compensation|industry|locations?|$))/i
+        const reqSectionMatch = text.match(reqSectionRegex)
+
         if (reqSectionMatch) {
             const reqLines = reqSectionMatch[1].split('\n')
             for (const line of reqLines) {
                 const cleaned = line.replace(/^[\s\-•*▪◦→\d.)]+/, '').trim()
-                if (cleaned.length > 5 && cleaned.length < 300) {
+                if (cleaned.length > 5 && cleaned.length < 350) {
                     requirements.push(cleaned)
                 }
             }
         }
-        // Fallback: grab bullet points
-        if (requirements.length === 0) {
+
+        // The Ultimate Fallback: Bullet Point Harvester
+        // If sections fail, we grab EVERY bullet point that isn't a header or too long
+        if (requirements.length < 3) {
             const bulletLines = text.match(/^[\s]*[•\-*▪→]\s*(.+)$/gm) || []
             bulletLines.forEach(line => {
                 const cleaned = line.replace(/^[\s\-•*▪→]+/, '').trim()
-                if (cleaned.length > 10 && cleaned.length < 300) {
-                    requirements.push(cleaned)
+                // Valid requirement check (not a header, decent length)
+                if (cleaned.length > 15 && cleaned.length < 400 && !JDParser.isInvalidTitle(cleaned) && !JDParser.isInvalidContent(cleaned)) {
+                    if (!requirements.includes(cleaned)) requirements.push(cleaned)
                 }
             })
+
+            // If even bullets are missing, just take the longest sentences from the whole text
+            if (requirements.length === 0) {
+                const sentences = text.split(/\.\s+|\n+/).map(s => s.trim())
+                sentences.forEach(s => {
+                    if (s.length > 40 && s.length < 250 && !JDParser.isInvalidTitle(s) && !JDParser.isInvalidContent(s)) {
+                        if (!requirements.includes(s) && requirements.length < 8) requirements.push(s)
+                    }
+                })
+            }
         }
 
         // ── SKILLS ──
@@ -217,15 +435,11 @@ class JDParser {
             description = descMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
         }
         if (!description && lines.length > 1) {
-            // Use the first paragraph-ish text
-            const paragraphs = text.split(/\n\s*\n/)
-            for (const p of paragraphs.slice(0, 3)) {
-                const cleaned = p.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim()
-                if (cleaned.length > 50 && cleaned.length < 500 && !/^[\-•*]/.test(cleaned)) {
-                    description = cleaned
-                    break
-                }
-            }
+            // Use the first few non-header lines as description
+            description = lines.slice(0, 5)
+                .filter(l => l.length > 20 && !JDParser.isInvalidTitle(l))
+                .join(' ')
+                .slice(0, 500)
         }
 
         // ── EMPLOYMENT TYPE ──

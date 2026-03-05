@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
             try {
                 const pdf = require('pdf-parse')
                 const buffer = await file.arrayBuffer()
+
                 const data = await pdf(Buffer.from(buffer))
                 jdText = data.text
             } catch (error) {
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
 
         // Parse the JD text
         const parser = new JDParser(process.env.OPENAI_API_KEY)
-        const data = await parser.parseJD(jdText)
+        const data = await parser.parseJD(jdText, file.name)
 
         return NextResponse.json({ data })
     } catch (error) {

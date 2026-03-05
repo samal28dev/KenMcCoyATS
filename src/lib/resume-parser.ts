@@ -60,6 +60,7 @@ Return the data in the EXACT JSON format specified below. Be thorough — do NOT
 
 JSON Structure:
 {
+  "_thought_process": "string - FIRST, write a brief paragraph analyzing the complete resume. Identify the candidate's core expertise, identify the highest qualification, calculate total years of experience, and note the most recent company and role. This step is CRITICAL for accurate extraction.",
   "personalInfo": {
     "firstName": "string",
     "lastName": "string",
@@ -110,8 +111,8 @@ JSON Structure:
   "achievements": ["awards, publications, notable achievements"],
   "keywords": ["top 20 ATS-relevant keywords from this resume"],
   "yearsOfExperience": "number — total years. Calculate from work dates if not stated directly. Round to nearest 0.5",
-  "currentRole": "string — MUST be filled. Current or most recent job title/designation",
-  "currentCompany": "string — MUST be filled. Current or most recent employer/organization",
+  "currentRole": "string — MUST be filled. Current or most recent job title/designation (e.g. Software Engineer)",
+  "currentCompany": "string — MUST be filled. Current or most recent employer/company name (e.g. Google)",
   "qualification": "string — highest qualification (e.g. 'B.Tech in Computer Science')",
   "allQualifications": ["ALL qualifications found, from highest to lowest, e.g. 'MBA - Finance', 'B.Com', '12th - CBSE'"],
   "ctc": "number or null — current/last CTC in INR. Convert lakhs to absolute (e.g. 12 LPA = 1200000). If in thousands, multiply appropriately",
@@ -129,31 +130,110 @@ CRITICAL INSTRUCTIONS:
 8. CTC: Look for "CTC", "Salary", "Compensation", "Package". Common formats: "12 LPA", "12,00,000", "12 Lakhs".
 9. Notice Period: Look for "Notice Period", "Notice", "Available from". "Immediate joiner" = 0 days. "1 month" = 30 days.
 10. Extract email carefully — must have @ symbol and valid domain.
+11. If a value seems like a role (e.g. Merchandiser, Teacher), do NOT put it in the company field.
+12. Be extremely careful with "LANGUAGES", "SOFT SKILLS", "ACHIEVEMENTS", "REFERENCES" or "SKILLS" sections — they are NOT people's names.
+13. NEVER use a known section header (e.g. "Achievements", "Soft Skills", "References") as a candidate's name, current company, or current designation.
+14. Location MUST be a City or City, State (e.g. "Mumbai", "Dubai, UAE"). NEVER include job descriptions or fragments like ", Incident Reporting".
+15. Skills must ONLY contain technology keywords, tools, or specific soft skills. NEVER include the candidate's name, contact info, or job duties in the skills list.
+16. Return a clean JSON object. Stripped of any preamble or postscript Markdown.
 `
 
 class ResumeParser {
   private openai: OpenAI | null = null
 
+  private static readonly NAME_STOP_WORDS = [
+    'resume', 'curriculum', 'vitae', 'cv', 'profile', 'objective',
+    'summary', 'email', 'phone', 'mobile', 'address', 'contact', 'education', 'skills',
+    'career', 'professional', 'personal', 'details', 'name:', 'full name:', 'candidate',
+    'languages', 'certifications', 'projects', 'achievements', 'objective', 'profile',
+    'summary', 'expertise', 'declaration', 'hobbies', 'interests', 'gender', 'nationality',
+    'marital', 'status', 'religion', 'father', 'mother', 'husband', 'wife', 'permanent',
+    'current', 'present', 'location', 'city', 'state', 'country', 'zip', 'pin', 'code',
+    'references', 'reference', 'place', 'date', 'signature', 'profile', 'summary',
+    'portfolio', 'links', 'social', 'strengths', 'weaknesses', 'hobbies', 'activities',
+    'soft skills', 'key skills', 'technical skills', 'skills & expertise', 'professional summary',
+    'work experience', 'employment history', 'academic profile', 'educational background',
+    'personal details', 'contact information', 'key achievements', 'honors & awards'
+  ]
+
+  private static readonly COMMON_LANGUAGES = [
+    'english', 'hindi', 'tamil', 'telugu', 'kannada', 'malayalam',
+    'marathi', 'gujarati', 'punjabi', 'bengali', 'assamese', 'odia', 'urdu', 'sanskrit',
+    'french', 'german', 'spanish', 'japanese', 'chinese', 'russian', 'arabic', 'portuguese',
+    'italian', 'korean', 'tamil', 'marathi', 'bengali', 'gujarati', 'kannada', 'telugu'
+  ]
+
+  public static scrub(val: string | undefined | null): string {
+    if (!val) return ''
+    return val
+      .replace(/^[\s,.\-–|:•·]+|[\s,.\-–|:•·]+$/g, '') // Remove leading/trailing punctuation
+      .replace(/\s{2,}/g, ' ') // Collapse spaces
+      .trim()
+  }
+
+  public static isInvalid(val: string | undefined | null): boolean {
+    const scrubbed = ResumeParser.scrub(val)
+    if (!scrubbed || scrubbed.length < 2) return true
+
+    const lower = scrubbed.toLowerCase()
+
+    // 1. Exact matches in exhaustive lists (on scrubbed value)
+    if (ResumeParser.NAME_STOP_WORDS.includes(lower) || ResumeParser.COMMON_LANGUAGES.includes(lower)) return true
+
+    // 2. Reject "CamelCase" strings that look like technical skills (e.g., "LeadershipCommunication")
+    if (!scrubbed.includes(' ') && /[a-z][A-Z]/.test(scrubbed)) return true
+
+    // 3. Reject fragments starting with punctuation (even after scrub, for internal fragments like ", Incident")
+    if (lower.startsWith(',') || lower.startsWith('.') || lower.startsWith('-')) return true
+
+    // 4. Partial matches for section headers or "junk" terms (more aggressive)
+    if (lower.length < 45) {
+      const suspiciousHeaders = [
+        'skills', 'achievements', 'references', 'experience', 'education',
+        'summary', 'profile', 'objective', 'expertise', 'declaration',
+        'interests', 'hobbies', 'projects', 'certifications', 'personal',
+        'communication', 'management', 'leadership', 'reporting', 'integration',
+        'security', 'incident', 'technical', 'key', 'core', 'professional', 'details',
+        'location', 'address', 'contact', 'name', 'phone', 'email', 'place', 'date'
+      ]
+      if (suspiciousHeaders.some(h => lower === h || lower.includes(` ${h}`) || lower.includes(`${h} `))) return true
+    }
+
+    // 5. Heuristic: Junk shouldn't be a single common word that isn't a name/entity
+    if (lower.split(/\s+/).length === 1 && lower.length < 3) return true
+
+    return false
+  }
+
   constructor(apiKey?: string) {
-    if (apiKey) {
+    // Support Groq if provided via GROQ_API_KEY env or if the apiKey starts with gsk_
+    const groqKey = process.env.GROQ_API_KEY;
+    const finalKey = apiKey || groqKey;
+
+    if (finalKey) {
+      const isGroq = finalKey.startsWith('gsk_') || !!groqKey;
       this.openai = new OpenAI({
-        apiKey,
+        apiKey: finalKey,
+        baseURL: isGroq ? 'https://api.groq.com/openai/v1' : undefined,
         dangerouslyAllowBrowser: false,
       })
     }
   }
 
-  async parseResume(resumeText: string): Promise<ParsedResume> {
+  async parseResume(resumeText: string, fileName?: string): Promise<ParsedResume> {
     // Always run basic parser first as a baseline
-    const basicResult = this.basicParse(resumeText)
+    const basicResult = this.basicParse(resumeText, fileName)
 
     if (!this.openai) {
       return basicResult
     }
 
     try {
+      const isGroq = !!process.env.GROQ_API_KEY || (this.openai as any)?.apiKey?.startsWith('gsk_');
+      const model = isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini';
+
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model,
         messages: [
           { role: 'system', content: RESUME_PARSING_PROMPT },
           { role: 'user', content: `Parse this resume:\n\n${resumeText}` },
@@ -164,7 +244,23 @@ class ResumeParser {
 
       const result = completion.choices[0]?.message?.content
       if (!result) throw new Error('No response from OpenAI')
-      const aiResult = JSON.parse(result) as ParsedResume
+
+      // Strip markdown block if AI includes it
+      let cleanJson = result.trim()
+      const match = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+      if (match && match[1]) {
+        cleanJson = match[1].trim()
+      } else if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+        cleanJson = cleanJson
+      } else {
+        const first = cleanJson.indexOf('{')
+        const last = cleanJson.lastIndexOf('}')
+        if (first !== -1 && last !== -1) {
+          cleanJson = cleanJson.substring(first, last + 1)
+        }
+      }
+
+      const aiResult = JSON.parse(cleanJson) as ParsedResume
 
       // Merge: AI takes priority, but fill any gaps from basic parser
       return this.mergeResults(aiResult, basicResult)
@@ -182,36 +278,81 @@ class ResumeParser {
       return a
     }
 
+    const pickValid = (aiVal: string | undefined | null, basicVal: string | undefined | null): string => {
+      const sAi = ResumeParser.scrub(aiVal)
+      const sBasic = ResumeParser.scrub(basicVal)
+      return ResumeParser.isInvalid(sAi) ? (ResumeParser.isInvalid(sBasic) ? '' : sBasic) : sAi
+    }
+
+    const cleanSkills = (list: string[]): string[] => {
+      const allNamesText = [
+        ai.personalInfo?.firstName, ai.personalInfo?.lastName,
+        basic.personalInfo?.firstName, basic.personalInfo?.lastName
+      ].join(' ').toLowerCase()
+      const nameWords = allNamesText.split(/[\s,]+/).filter(n => n && n.length > 2)
+
+      return list
+        .map(s => ResumeParser.scrub(s))
+        .filter(s => {
+          if (!s || s.length < 2) return false
+          const lowerS = s.toLowerCase()
+          // 1. Filter out candidate name words
+          if (nameWords.some(nw => lowerS.includes(nw))) return false
+          // 2. Filter out explicit junk
+          if (ResumeParser.isInvalid(s)) return false
+          // 3. Filter out email/phone patterns if leaked
+          if (lowerS.includes('@') || /\d{8,}/.test(lowerS)) return false
+          return true
+        })
+    }
+
     return {
       personalInfo: {
-        firstName: pick(ai.personalInfo?.firstName, basic.personalInfo.firstName),
-        lastName: pick(ai.personalInfo?.lastName, basic.personalInfo.lastName),
+        firstName: pickValid(ai.personalInfo?.firstName, basic.personalInfo.firstName),
+        lastName: pickValid(ai.personalInfo?.lastName, basic.personalInfo.lastName),
         email: pick(ai.personalInfo?.email, basic.personalInfo.email),
         phone: pick(ai.personalInfo?.phone, basic.personalInfo.phone),
         altPhone: pick(ai.personalInfo?.altPhone, basic.personalInfo.altPhone),
-        location: pick(ai.personalInfo?.location, basic.personalInfo.location),
+        location: pickValid(ai.personalInfo?.location, basic.personalInfo.location),
         linkedin: pick(ai.personalInfo?.linkedin, basic.personalInfo.linkedin),
         github: pick(ai.personalInfo?.github, basic.personalInfo.github),
         portfolio: pick(ai.personalInfo?.portfolio, basic.personalInfo.portfolio),
         dob: pick(ai.personalInfo?.dob, basic.personalInfo.dob),
       },
       summary: pick(ai.summary, basic.summary),
-      experience: (ai.experience?.length ? ai.experience : basic.experience),
-      education: (ai.education?.length ? ai.education : basic.education),
+      experience: (ai.experience?.length ? ai.experience : basic.experience).map(e => ({
+        ...e,
+        company: ResumeParser.scrub(e.company),
+        title: ResumeParser.scrub(e.title)
+      })).filter(e => !ResumeParser.isInvalid(e.company) || !ResumeParser.isInvalid(e.title)),
+      education: (ai.education?.length ? ai.education : basic.education).map(e => ({
+        ...e,
+        institution: ResumeParser.scrub(e.institution),
+        degree: ResumeParser.scrub(e.degree)
+      })).filter(e => !ResumeParser.isInvalid(e.institution) || !ResumeParser.isInvalid(e.degree)),
       skills: {
-        technical: [...new Set([...(ai.skills?.technical || []), ...(basic.skills?.technical || [])])],
-        soft: pick(ai.skills?.soft, basic.skills.soft),
+        technical: cleanSkills([...new Set([...(ai.skills?.technical || []), ...(basic.skills?.technical || [])])]),
+        soft: cleanSkills([...new Set([...(ai.skills?.soft || []), ...(basic.skills?.soft || [])])]),
         languages: pick(ai.skills?.languages, basic.skills.languages),
         certifications: [...new Set([...(ai.skills?.certifications || []), ...(basic.skills?.certifications || [])])],
       },
-      projects: pick(ai.projects, basic.projects),
-      achievements: pick(ai.achievements, basic.achievements),
-      keywords: pick(ai.keywords, basic.keywords),
+      projects: (ai.projects || []).map(p => ({
+        ...p,
+        name: ResumeParser.scrub(p.name)
+      })).filter(p => !ResumeParser.isInvalid(p.name)),
+      achievements: [...new Set([...(ai.achievements || []), ...(basic.achievements || [])])]
+        .map(a => ResumeParser.scrub(a))
+        .filter(a => a && !ResumeParser.isInvalid(a)),
+      keywords: cleanSkills(ai.keywords || basic.keywords || []),
       yearsOfExperience: ai.yearsOfExperience || basic.yearsOfExperience,
-      currentRole: pick(ai.currentRole, basic.currentRole),
-      currentCompany: pick(ai.currentCompany, basic.currentCompany),
-      qualification: pick(ai.qualification, basic.qualification),
-      allQualifications: [...new Set([...(ai.allQualifications || []), ...(basic.allQualifications || [])])],
+      currentRole: pickValid(ai.currentRole, basic.currentRole),
+      currentCompany: pickValid(ai.currentCompany, basic.currentCompany),
+      qualification: pickValid(ai.qualification, basic.qualification),
+      allQualifications: [...new Set(
+        [...(ai.allQualifications || []), ...(basic.allQualifications || [])]
+          .map(q => ResumeParser.scrub(q))
+          .filter(q => q && !ResumeParser.isInvalid(q))
+      )],
       ctc: ai.ctc ?? basic.ctc,
       noticePeriod: ai.noticePeriod ?? basic.noticePeriod,
     }
@@ -220,7 +361,7 @@ class ResumeParser {
   // ────────────────────────────────────────────────────
   // BASIC (REGEX) PARSER — comprehensive fallback
   // ────────────────────────────────────────────────────
-  private basicParse(text: string): ParsedResume {
+  private basicParse(text: string, fileName?: string): ParsedResume {
     const rawLines = text.split('\n')
     const lines = rawLines.map(l => l.trim()).filter(l => l)
     const textLower = text.toLowerCase()
@@ -331,10 +472,6 @@ class ResumeParser {
     // 3. NAME
     // ═══════════════════════════════════════════════════
     let firstName = '', lastName = ''
-    const nameStopWords = ['resume', 'curriculum', 'vitae', 'cv', 'profile', 'objective',
-      'summary', 'email', 'phone', 'mobile', 'address', 'contact', 'experience',
-      'education', 'skills', 'career', 'professional', 'personal', 'details',
-      'name:', 'full name:', 'candidate']
 
     // Strategy 1: Look for explicit "Name:" label
     const nameLabel = text.match(/(?:full\s*)?name\s*[:\-–]\s*([A-Za-z\s.]+?)(?:\n|$)/i)
@@ -353,7 +490,11 @@ class ResumeParser {
         if (lineLower.includes('@') || lineLower.includes('http') || lineLower.includes('www.')) continue
         if (/^\d/.test(trimmed)) continue
         if (/^[\+\(]?\d/.test(trimmed) && /\d{4,}/.test(trimmed)) continue
-        if (nameStopWords.some(w => lineLower.startsWith(w))) continue
+
+        // Skip if line is exactly a stop word or language
+        if (ResumeParser.NAME_STOP_WORDS.includes(lineLower) || ResumeParser.COMMON_LANGUAGES.includes(lineLower)) continue
+
+        if (ResumeParser.NAME_STOP_WORDS.some(w => lineLower.startsWith(w))) continue
         // Skip if it's mostly non-alpha (phone, address)
         if (trimmed.replace(/[^A-Za-z\s]/g, '').length < trimmed.length * 0.6) continue
 
@@ -362,12 +503,36 @@ class ResumeParser {
         cleaned = cleaned.replace(/\s*[|–\-—].*$/, '').trim()
 
         const words = cleaned.split(/\s+/).filter(w => w.length > 0)
-        // Name: 1-5 words, mostly alphabetic
-        if (words.length >= 1 && words.length <= 5 && words.every(w => /^[A-Za-z.']+$/.test(w))) {
+        const lineToTest = cleaned.toLowerCase()
+
+        // Name validation: 1-5 words, mostly alphabetic, not a stop word or language
+        if (words.length >= 1 && words.length <= 5 &&
+          words.every(w => /^[A-Za-z.']+$/.test(w)) &&
+          !ResumeParser.NAME_STOP_WORDS.includes(lineToTest) &&
+          !ResumeParser.COMMON_LANGUAGES.includes(lineToTest)) {
+
+          // Secondary check: ensure the line doesn't CONTAIN a header keyword as a whole word
+          const suspicious = ['skills', 'achievements', 'references', 'experience', 'education', 'summary', 'profile', 'objective']
+          if (suspicious.some(sw => lineToTest === sw || lineToTest.includes(` ${sw}`) || lineToTest.includes(`${sw} `))) continue;
+
           firstName = words[0]
           lastName = words.slice(1).join(' ')
           break
         }
+      }
+    }
+
+    // Strategy 3: Guess from FileName if still not found or invalid
+    if ((!firstName || ResumeParser.isInvalid(firstName)) && fileName) {
+      let namePart = fileName.replace(/\.[^/.]+$/, "") // Remove extension
+      // Remove common noise
+      namePart = namePart.replace(/^(resume|cv|naukri|linkedin|profile|candidate)[_\-\s]*/i, '')
+      namePart = namePart.replace(/[_\-\s]*(\[.*?\]|\d+y.*|\d+m.*|)$/i, '') // Remove [14y_0m] etc
+
+      const parts = namePart.trim().split(/[\s_\-]+/).filter(p => p.length > 2)
+      if (parts.length >= 1) {
+        firstName = parts[0]
+        lastName = parts.slice(1).join(' ')
       }
     }
 
@@ -554,7 +719,7 @@ class ResumeParser {
     let currentRole = ''
 
     // Role-title keywords for validation
-    const roleTitleKeywords = /\b(engineer|developer|manager|analyst|consultant|lead|architect|designer|administrator|director|executive|officer|specialist|associate|intern|trainee|head|vp|svp|avp|president|coordinator|supervisor|technician|scientist|researcher|accountant|recruiter|hr\b|sde|swe|qa|tester|devops|full\s*stack|front\s*end|back\s*end|data|product|project|program|business|operations|marketing|sales|support|admin|software|senior|junior|sr\.?|jr\.?|chief|principal|staff|clerk|teacher|professor|lecturer|assistant|pilot|nurse|doctor|lawyer|advocate|ca\b|cfo|ceo|cto|coo|founder|co-founder|partner|member|fellow)\b/i
+    const roleTitleKeywords = /\b(engineer|developer|manager|analyst|consultant|lead|architect|designer|administrator|director|executive|officer|specialist|associate|intern|trainee|head|vp|svp|avp|president|coordinator|supervisor|technician|scientist|researcher|accountant|recruiter|hr\b|sde|swe|qa|tester|devops|full\s*stack|front\s*end|back\s*end|data|product|project|program|business|operations|marketing|sales|support|admin|software|senior|junior|sr\.?|jr\.?|chief|principal|staff|clerk|teacher|professor|lecturer|assistant|pilot|nurse|doctor|lawyer|advocate|ca\b|cfo|ceo|cto|coo|founder|co-founder|partner|member|fellow|merchandiser|buyer|stylist|pattern\s*maker|sampling|production|quality|qc\b|gp\b|merchandising)\b/i
 
     const cleanField = (val: string) => val.replace(/^[\s,.\-–|:]+|[\s,.\-–|:]+$/g, '').replace(/\s{2,}/g, ' ').trim()
 

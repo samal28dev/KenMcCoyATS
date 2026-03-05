@@ -19,12 +19,17 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
     if (res.status === 401) {
         // Token expired / invalid — redirect to login (once only)
-        if (typeof window !== 'undefined' && !isRedirecting) {
-            const isAlreadyOnAuth = window.location.pathname.startsWith('/sign-in') ||
-                window.location.pathname.startsWith('/sign-up')
-            if (!isAlreadyOnAuth) {
-                isRedirecting = true
-                window.location.href = '/sign-in'
+        if (typeof window !== 'undefined') {
+            // Clear the cookie to prevent middleware from redirecting us back to root
+            document.cookie = "ats_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
+
+            if (!isRedirecting) {
+                const isAlreadyOnAuth = window.location.pathname.startsWith('/sign-in') ||
+                    window.location.pathname.startsWith('/sign-up')
+                if (!isAlreadyOnAuth) {
+                    isRedirecting = true
+                    window.location.href = '/sign-in'
+                }
             }
         }
         throw new Error('Unauthorized')
