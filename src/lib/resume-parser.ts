@@ -54,88 +54,127 @@ export interface ParsedResume {
 }
 
 const RESUME_PARSING_PROMPT = `
-You are an expert resume/CV parser specialising in Indian and international resumes.
-Extract EVERY piece of structured information from the provided resume text.
-Return the data in the EXACT JSON format specified below. Be thorough — do NOT leave fields null/empty if the information exists anywhere in the text.
+You are an expert resume/CV parser with deep knowledge of Indian and international resume formats.
+Your job is to extract structured data from raw resume text and return it as a single valid JSON object.
 
-JSON Structure:
+RULES BEFORE YOU START:
+- Read the ENTIRE resume text before filling any field.
+- Every field must reflect ACTUAL content from the resume. Never invent or guess data.
+- If a field is genuinely not present, use null for scalars or [] for arrays. Never use the string "null".
+- All arrays must contain only real non-empty string values. No "null", "", "N/A", "Not mentioned" inside arrays.
+
+JSON OUTPUT FORMAT (return exactly this structure):
 {
-  "_thought_process": "string - FIRST, write a brief paragraph analyzing the complete resume. Identify the candidate's core expertise, identify the highest qualification, calculate total years of experience, and note the most recent company and role. This step is CRITICAL for accurate extraction.",
   "personalInfo": {
-    "firstName": "string",
-    "lastName": "string",
-    "email": "string — must include @domain.com",
-    "phone": "string — primary mobile. Include country code if present, otherwise just digits",
-    "altPhone": "string — alternative/secondary number or empty",
-    "location": "string — current city/location. Extract from address, header, or context",
-    "linkedin": "string or null — full URL",
-    "github": "string or null — full URL",
-    "portfolio": "string or null — any personal website",
-    "dob": "string — date of birth in YYYY-MM-DD format if found, else null"
+    "firstName": "First name only. If the resume has a single name (e.g. 'Raje'), put it here and leave lastName empty.",
+    "lastName": "Last name only. Empty string if only one name.",
+    "email": "Full email with @ and domain. null if not found.",
+    "phone": "Primary mobile — digits only, no spaces/dashes. Include country code digits (e.g. 919876543210 or 9876543210). null if not found.",
+    "altPhone": "Secondary/alternative mobile digits only. Empty string if not found.",
+    "location": "City or 'City, State' or 'City, Country' only (e.g. 'Mumbai', 'Pune, Maharashtra', 'Dubai, UAE'). Do NOT include street address, pincode, or any sentence fragments.",
+    "linkedin": "Full LinkedIn URL or null.",
+    "github": "Full GitHub URL or null.",
+    "portfolio": "Any personal website URL or null.",
+    "dob": "YYYY-MM-DD if found (e.g. '1995-06-15'). JSON null if not present. NEVER the string 'null'."
   },
-  "summary": "string — professional summary/objective if available",
+  "summary": "Professional summary or objective paragraph if present. Empty string if not found.",
   "experience": [
     {
-      "company": "string — company/organization name",
-      "title": "string — job title/designation",
-      "startDate": "string — format YYYY-MM",
-      "endDate": "string — format YYYY-MM or 'Present'",
-      "description": "string — role description",
-      "highlights": ["key achievements in this role"]
+      "company": "Exact company/organization name. Never a job title or section header.",
+      "title": "Exact job title/designation at that company.",
+      "startDate": "YYYY-MM format (e.g. '2021-06'). Use '2021-01' if only year is given.",
+      "endDate": "'Present' if current job, or YYYY-MM format. Never null.",
+      "description": "Brief role description or responsibilities.",
+      "highlights": ["Specific achievements, metrics, or impact statements from this role. Empty array if none mentioned."]
     }
   ],
   "education": [
     {
-      "institution": "string — college/university/school name",
-      "degree": "string — degree name (B.Tech, MBA, etc.)",
-      "field": "string — field of study/specialization",
-      "startDate": "string",
-      "endDate": "string — graduation year or expected year",
-      "gpa": "string or null — CGPA, percentage, or grade"
+      "institution": "College, university, or school name.",
+      "degree": "Degree type only (e.g. 'B.Tech', 'MBA', '12th', '10th', 'Diploma').",
+      "field": "Specialization or stream (e.g. 'Computer Science', 'Finance', 'Science'). Empty string if not mentioned.",
+      "startDate": "Year or YYYY-MM. Empty string if not found.",
+      "endDate": "Graduation year or expected year. Empty string if not found.",
+      "gpa": "CGPA, percentage, or grade as string (e.g. '8.5/10', '75%'). null if not mentioned."
     }
   ],
   "skills": {
-    "technical": ["every technical skill, tool, technology, framework, language mentioned"],
-    "soft": ["soft skills mentioned"],
-    "languages": ["spoken/written languages like English, Hindi, etc."],
-    "certifications": ["all certifications and professional courses"]
+    "technical": ["Programming languages, frameworks, databases, tools, platforms, cloud services, methodologies. Each as a short keyword."],
+    "soft": ["Interpersonal and professional soft skills explicitly mentioned."],
+    "languages": ["Spoken or written human languages (e.g. 'English', 'Hindi', 'Marathi')."],
+    "certifications": ["Certification names and courses (e.g. 'AWS Certified Developer', 'Google Analytics')."]
   },
   "projects": [
     {
-      "name": "string",
-      "description": "string",
-      "technologies": ["technologies used"],
-      "url": "string or null"
+      "name": "Project name.",
+      "description": "What the project does in 1-2 sentences.",
+      "technologies": ["Technologies used in this project."],
+      "url": "Project URL or null."
     }
   ],
-  "achievements": ["awards, publications, notable achievements"],
-  "keywords": ["top 20 ATS-relevant keywords from this resume"],
-  "yearsOfExperience": "number — total years. Calculate from work dates if not stated directly. Round to nearest 0.5",
-  "currentRole": "string — MUST be filled. Current or most recent job title/designation (e.g. Software Engineer)",
-  "currentCompany": "string — MUST be filled. Current or most recent employer/company name (e.g. Google)",
-  "qualification": "string — highest qualification (e.g. 'B.Tech in Computer Science')",
-  "allQualifications": ["ALL qualifications found, from highest to lowest, e.g. 'MBA - Finance', 'B.Com', '12th - CBSE'"],
-  "ctc": "number or null — current/last CTC in INR. Convert lakhs to absolute (e.g. 12 LPA = 1200000). If in thousands, multiply appropriately",
-  "noticePeriod": "number or null — in days. Convert months to days (1 month = 30 days). Immediate = 0"
+  "achievements": ["Awards, publications, competitions, recognitions. Each as a separate string."],
+  "keywords": ["Top 15 ATS-relevant keywords that best represent this candidate's profile."],
+  "yearsOfExperience": 0,
+  "currentRole": "Most recent or current job title. Empty string if fresher with no experience.",
+  "currentCompany": "Most recent or current employer. Empty string if fresher with no experience.",
+  "qualification": "Highest qualification as a short label (e.g. 'B.Tech in Computer Science', 'MBA - Finance', 'MCA'). Empty string if not found.",
+  "allQualifications": ["All degrees/qualifications found, highest first. Each as a short label like 'B.Tech - CSE', 'MBA', '12th - CBSE', '10th'. Do NOT include institution names here."],
+  "ctc": null,
+  "noticePeriod": null
 }
 
-CRITICAL INSTRUCTIONS:
-1. currentRole and currentCompany MUST NOT be null if ANY work experience is mentioned. Use the most recent/current entry.
-2. For experience array, list ALL positions chronologically (newest first). The entry with endDate='Present' or the latest end date is current.
-3. Capture ALL qualifications — from PhD to 10th class. Include specialization/stream.
-4. Phone numbers: Indian mobiles are 10 digits starting with 6/7/8/9. Look for +91 prefix.
-5. DOB: Look for "DOB", "Date of Birth", "D.O.B", "Born", "Birth Date" labels. Convert to YYYY-MM-DD.
-6. Location: Check header area, address section, "Current Location:" label, or city mentioned near the name.
-7. Skills: Extract EVERY technical keyword — programming languages, frameworks, databases, tools, platforms, methodologies.
-8. CTC: Look for "CTC", "Salary", "Compensation", "Package". Common formats: "12 LPA", "12,00,000", "12 Lakhs".
-9. Notice Period: Look for "Notice Period", "Notice", "Available from". "Immediate joiner" = 0 days. "1 month" = 30 days.
-10. Extract email carefully — must have @ symbol and valid domain.
-11. If a value seems like a role (e.g. Merchandiser, Teacher), do NOT put it in the company field.
-12. Be extremely careful with "LANGUAGES", "SOFT SKILLS", "ACHIEVEMENTS", "REFERENCES" or "SKILLS" sections — they are NOT people's names.
-13. NEVER use a known section header (e.g. "Achievements", "Soft Skills", "References") as a candidate's name, current company, or current designation.
-14. Location MUST be a City or City, State (e.g. "Mumbai", "Dubai, UAE"). NEVER include job descriptions or fragments like ", Incident Reporting".
-15. Skills must ONLY contain technology keywords, tools, or specific soft skills. NEVER include the candidate's name, contact info, or job duties in the skills list.
-16. Return a clean JSON object. Stripped of any preamble or postscript Markdown.
+FIELD-BY-FIELD INSTRUCTIONS:
+
+NAME:
+- Look at the very top of the resume for the candidate's name — it's usually the largest text.
+- Split into firstName and lastName. If only one word (e.g. "Raje"), put it in firstName, lastName = "".
+- NEVER use section headers (e.g. "Resume", "Curriculum Vitae", "Profile") as a name.
+
+PHONE:
+- Indian mobiles: 10 digits starting with 6, 7, 8, or 9. May have +91 prefix.
+- Strip all spaces, dashes, parentheses — store digits only (or with + prefix).
+- If two numbers found, put the first/primary in phone, second in altPhone.
+
+EMAIL: Must contain exactly one @ symbol followed by a domain with a dot.
+
+LOCATION: Extract city/state/country only. Not the full address. Not job descriptions.
+
+EXPERIENCE:
+- List ALL jobs, newest first.
+- endDate = 'Present' for the current/latest job if still working there.
+- yearsOfExperience: Calculate total from start of first job to today. Round to nearest 0.5. If fresher = 0.
+- currentRole and currentCompany = the entry with endDate='Present', or the most recent one.
+- If candidate is a fresher (student, no work history), set currentRole="", currentCompany="", yearsOfExperience=0.
+
+EDUCATION & QUALIFICATIONS:
+- allQualifications: Short degree labels only — no institution names, no cities.
+  ✓ Good: ["M.Tech - AI&ML", "B.E - Computer Engineering", "12th - CBSE"]
+  ✗ Bad: ["Bachelor of Technology in Computer Science from Mumbai University", "null"]
+- qualification: Highest degree as a concise label.
+
+SKILLS:
+- technical: Only technology terms. No names, no email, no phone, no duties.
+- Each item should be a concise keyword (e.g. "React", "Python", "MySQL", "AWS") not a sentence.
+
+CTC:
+- Look for: "CTC", "Salary", "Package", "Compensation", "Current CTC", "Expected CTC".
+- Convert to INR number: "12 LPA" → 1200000, "50,000/month" → 600000, "5.5L" → 550000.
+- If not found → JSON null (NOT the string "null").
+
+NOTICE PERIOD:
+- "Immediate" or "Immediate Joiner" → 0
+- "1 month" → 30, "2 months" → 60, "3 months" → 90, "15 days" → 15
+- If not found → JSON null.
+
+DOB: Look for labels: "DOB", "Date of Birth", "D.O.B.", "Born on", "Birth Date".
+- Output format: "YYYY-MM-DD". If day unknown: "1995-06-01". If not found: JSON null.
+
+OUTPUT RULES:
+- Return ONLY the JSON object. No explanation, no markdown, no code block.
+- yearsOfExperience must be a JSON number (e.g. 3.5), not a string.
+- ctc and noticePeriod must be a JSON number OR JSON null — never a string.
+- dob must be a "YYYY-MM-DD" string OR JSON null — never the string "null".
+- Arrays must never contain: the string "null", empty strings "", "N/A", "Not mentioned", or institution names inside allQualifications.
 `
 
 class ResumeParser {
@@ -232,13 +271,28 @@ class ResumeParser {
       const isGroq = !!process.env.GROQ_API_KEY || (this.openai as any)?.apiKey?.startsWith('gsk_');
       const model = isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini';
 
+      // Smart extraction: take first 2000 chars (name, contact, recent experience)
+      // + last 1500 chars (education, skills, CTC, notice period — typically at the bottom)
+      // This preserves both ends of the resume instead of blindly chopping the tail.
+      const HEAD = isGroq ? 2000 : 6000;
+      const TAIL = isGroq ? 1500 : 5000;
+      let truncatedText: string;
+      if (resumeText.length <= HEAD + TAIL) {
+        truncatedText = resumeText;
+      } else {
+        const head = resumeText.substring(0, HEAD);
+        const tail = resumeText.substring(resumeText.length - TAIL);
+        truncatedText = head + '\n\n[...middle section omitted...]\n\n' + tail;
+      }
+
       const completion = await this.openai.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: RESUME_PARSING_PROMPT },
-          { role: 'user', content: `Parse this resume:\n\n${resumeText}` },
+          { role: 'user', content: `Parse this resume:\n\n${truncatedText}` },
         ],
         temperature: 0.1,
+        max_tokens: 2000,
         response_format: { type: 'json_object' },
       })
 

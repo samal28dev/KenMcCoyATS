@@ -21,7 +21,6 @@ Return the data in the exact JSON format specified below. Be thorough and accura
 
 JSON Structure:
 {
-  "_thought_process": "string - FIRST, write a brief paragraph analyzing the entire document. Identify the true job title (ignoring generic template headers like 'Annexure' or 'JD Template'), understand the primary responsibilities, and note where the requirements/skills are located. This step is CRITICAL for accurate extraction.",
   "title": "string - the ACTUAL job title / position name (derived from your analysis)",
   "description": "string - a concise summary of the role (2-4 sentences). Do NOT copy the entire JD here.",
   "requirements": ["array of individual requirement strings - each should be a separate requirement, e.g., '5+ years of experience in React', 'Strong communication skills', 'MBA preferred'"],
@@ -163,13 +162,27 @@ class JDParser {
             const isGroq = !!process.env.GROQ_API_KEY || (this.openai as any)?.apiKey?.startsWith('gsk_');
             const model = isGroq ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini';
 
+            // Smart extraction: head (title, overview) + tail (requirements, skills, compensation)
+            // JDs typically have the job title/summary at top and requirements/skills at the bottom.
+            const HEAD = isGroq ? 1500 : 5000;
+            const TAIL = isGroq ? 1500 : 4000;
+            let truncatedText: string;
+            if (jdText.length <= HEAD + TAIL) {
+                truncatedText = jdText;
+            } else {
+                const head = jdText.substring(0, HEAD);
+                const tail = jdText.substring(jdText.length - TAIL);
+                truncatedText = head + '\n\n[...middle section omitted...]\n\n' + tail;
+            }
+
             const completion = await this.openai.chat.completions.create({
                 model,
                 messages: [
                     { role: 'system', content: JD_PARSING_PROMPT },
-                    { role: 'user', content: `FileName: ${fileName || 'unnamed'}. Parse this job description:\n\n${jdText}` },
+                    { role: 'user', content: `FileName: ${fileName || 'unnamed'}. Parse this job description:\n\n${truncatedText}` },
                 ],
                 temperature: 0.1,
+                max_tokens: 1500,
                 response_format: { type: 'json_object' },
             })
 

@@ -47,10 +47,7 @@ const CandidateSchema = new mongoose.Schema({
     currentCompany: { type: String },
     designation: { type: String },
     experience: { type: String },
-    qualifications: [{
-        type: String,
-        enum: QUALIFICATION_OPTIONS,
-    }],
+    qualifications: [{ type: String }],  // free-text — AI parser returns full degree names
     skills: [{ type: String }],
 
     // Compensation

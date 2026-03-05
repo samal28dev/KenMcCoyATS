@@ -29,6 +29,8 @@ export default function CandidatesPage() {
     const [noticePeriodPill, setNoticePeriodPill] = useState('')
     const [ugQual, setUgQual] = useState('')
     const [pgQual, setPgQual] = useState('')
+    const [ugSpecific, setUgSpecific] = useState('')
+    const [pgSpecific, setPgSpecific] = useState('')
     const [showEmployment, setShowEmployment] = useState(true)
     const [showEducation, setShowEducation] = useState(true)
     const [hasSearched, setHasSearched] = useState(false)
@@ -49,7 +51,8 @@ export default function CandidatesPage() {
     const [appliedFilters, setAppliedFilters] = useState({
         search: '', status: '', minExp: '', maxExp: '',
         location: '', minCTC: '', maxCTC: '', maxNotice: '', skills: '',
-        designation: '', company: ''
+        designation: '', company: '', ugQual: '', pgQual: '', ugSpecific: '', pgSpecific: '',
+        industry: '', deptRole: '', degree: '', college: '', gradYear: ''
     })
 
     useEffect(() => {
@@ -105,6 +108,15 @@ export default function CandidatesPage() {
             if (appliedFilters.skills) params.set('skills', appliedFilters.skills)
             if ((appliedFilters as any).designation) params.set('designation', (appliedFilters as any).designation)
             if ((appliedFilters as any).company) params.set('company', (appliedFilters as any).company)
+            if ((appliedFilters as any).ugQual) params.set('ugQual', (appliedFilters as any).ugQual)
+            if ((appliedFilters as any).pgQual) params.set('pgQual', (appliedFilters as any).pgQual)
+            if ((appliedFilters as any).ugSpecific) params.set('ugSpecific', (appliedFilters as any).ugSpecific)
+            if ((appliedFilters as any).pgSpecific) params.set('pgSpecific', (appliedFilters as any).pgSpecific)
+            if ((appliedFilters as any).industry) params.set('industry', (appliedFilters as any).industry)
+            if ((appliedFilters as any).deptRole) params.set('deptRole', (appliedFilters as any).deptRole)
+            if ((appliedFilters as any).degree) params.set('degree', (appliedFilters as any).degree)
+            if ((appliedFilters as any).college) params.set('college', (appliedFilters as any).college)
+            if ((appliedFilters as any).gradYear) params.set('gradYear', (appliedFilters as any).gradYear)
             params.set('page', page.toString())
             params.set('limit', '30')
             const res = await apiFetch(`/api/candidates?${params}`)
@@ -126,7 +138,10 @@ export default function CandidatesPage() {
             search, status: statusFilter, minExp, maxExp,
             location: locationFilter, minCTC, maxCTC,
             maxNotice: noticePillToMaxNotice(noticePeriodPill),
-            skills: skillsFilter, designation: designationFilter, company: companyFilter
+            skills: skillsFilter, designation: designationFilter, company: companyFilter,
+            ugQual, pgQual, ugSpecific, pgSpecific,
+            industry: industryFilter, deptRole: deptRoleFilter, degree: degreeFilter,
+            college: collegeFilter, gradYear: gradYearFilter,
         }
         setAppliedFilters(filters)
         setPage(1)
@@ -158,14 +173,20 @@ export default function CandidatesPage() {
         setMinExp(f.minExp || ''); setMaxExp(f.maxExp || '')
         setLocationFilter(f.location || ''); setMinCTC(f.minCTC || ''); setMaxCTC(f.maxCTC || '')
         setSkillsFilter(f.skills || ''); setDesignationFilter(f.designation || ''); setCompanyFilter(f.company || '')
+        setUgQual(f.ugQual || ''); setPgQual(f.pgQual || '')
+        setUgSpecific(f.ugSpecific || ''); setPgSpecific(f.pgSpecific || '')
+        setIndustryFilter(f.industry || ''); setDeptRoleFilter(f.deptRole || '')
+        setDegreeFilter(f.degree || ''); setCollegeFilter(f.college || ''); setGradYearFilter(f.gradYear || '')
     }
 
     const handleClearFilters = () => {
         setSearch(''); setStatusFilter(''); setMinExp(''); setMaxExp('')
         setLocationFilter(''); setMinCTC(''); setMaxCTC(''); setMaxNotice(''); setSkillsFilter('')
         setDesignationFilter(''); setCompanyFilter(''); setIndustryFilter('')
-        setNoticePeriodPill(''); setUgQual(''); setPgQual('')
-        setAppliedFilters({ search: '', status: '', minExp: '', maxExp: '', location: '', minCTC: '', maxCTC: '', maxNotice: '', skills: '', designation: '', company: '' })
+        setNoticePeriodPill(''); setUgQual(''); setPgQual(''); setUgSpecific(''); setPgSpecific('')
+        setDeptRoleFilter(''); setDegreeFilter(''); setCollegeFilter(''); setGradYearFilter('')
+        setKeywordInResults(''); setSortBy('Relevance'); setActiveIn('6 months'); setHideProfiles(false)
+        setAppliedFilters({ search: '', status: '', minExp: '', maxExp: '', location: '', minCTC: '', maxCTC: '', maxNotice: '', skills: '', designation: '', company: '', ugQual: '', pgQual: '', ugSpecific: '', pgSpecific: '', industry: '', deptRole: '', degree: '', college: '', gradYear: '' })
         setHasSearched(false)
         setPage(1)
     }
@@ -180,9 +201,22 @@ export default function CandidatesPage() {
     const activeInDays: number | null = activeIn === '1 month' ? 30 : activeIn === '3 months' ? 90 : activeIn === '1 year' ? 365 : activeIn === 'Any' ? null : 180
     const displayCandidates = [...candidates]
         .filter((c: any) => {
-            if (!activeInDays) return true
-            const t = new Date(c.updatedAt || c.createdAt).getTime()
-            return (Date.now() - t) <= activeInDays * 86400000
+            if (activeInDays) {
+                const t = new Date(c.updatedAt || c.createdAt).getTime()
+                if ((Date.now() - t) > activeInDays * 86400000) return false
+            }
+            if (hideProfiles && c.status !== 'new') return false
+            if (keywordInResults) {
+                const kw = keywordInResults.toLowerCase()
+                if (!(
+                    (c.name || '').toLowerCase().includes(kw) ||
+                    (c.designation || '').toLowerCase().includes(kw) ||
+                    (c.location || '').toLowerCase().includes(kw) ||
+                    (c.currentCompany || '').toLowerCase().includes(kw) ||
+                    (c.skills || []).some((s: string) => s.toLowerCase().includes(kw))
+                )) return false
+            }
+            return true
         })
         .sort((a: any, b: any) => {
             if (sortBy === 'Experience') return (Number(b.experience) || 0) - (Number(a.experience) || 0)
@@ -290,6 +324,8 @@ export default function CandidatesPage() {
             }
         } catch {
             toast.error('Failed to process resume')
+        } finally {
+            setParsing(false)
         }
     }
 
@@ -738,23 +774,33 @@ export default function CandidatesPage() {
                                                 <label className="text-xs text-muted-foreground mb-2 block">UG Qualification</label>
                                                 <div className="flex flex-wrap gap-2">
                                                     {['Any UG qualification', 'Specific UG qualification', 'No UG qualification'].map(opt => (
-                                                        <button key={opt} onClick={() => setUgQual(ugQual === opt ? '' : opt)}
+                                                        <button key={opt} onClick={() => { setUgQual(ugQual === opt ? '' : opt); if (opt !== 'Specific UG qualification') setUgSpecific('') }}
                                                             className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${ugQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
                                                             {opt}
                                                         </button>
                                                     ))}
                                                 </div>
+                                                {ugQual === 'Specific UG qualification' && (
+                                                    <input value={ugSpecific} onChange={e => setUgSpecific(e.target.value)}
+                                                        placeholder="e.g. B.Tech, BCA, B.Sc"
+                                                        className="mt-2 w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                                )}
                                             </div>
                                             <div>
                                                 <label className="text-xs text-muted-foreground mb-2 block">PG Qualification</label>
                                                 <div className="flex flex-wrap gap-2">
                                                     {['Any PG qualification', 'Specific PG qualification', 'No PG qualification'].map(opt => (
-                                                        <button key={opt} onClick={() => setPgQual(pgQual === opt ? '' : opt)}
+                                                        <button key={opt} onClick={() => { setPgQual(pgQual === opt ? '' : opt); if (opt !== 'Specific PG qualification') setPgSpecific('') }}
                                                             className={`px-4 py-1.5 text-xs border rounded-full transition-colors ${pgQual === opt ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'border-border text-foreground hover:border-blue-300'}`}>
                                                             {opt}
                                                         </button>
                                                     ))}
                                                 </div>
+                                                {pgQual === 'Specific PG qualification' && (
+                                                    <input value={pgSpecific} onChange={e => setPgSpecific(e.target.value)}
+                                                        placeholder="e.g. MBA, M.Tech, MCA"
+                                                        className="mt-2 w-full px-3 py-2 text-sm border border-border rounded focus:outline-none focus:border-blue-400" />
+                                                )}
                                             </div>
                                         </div>
                                     )}

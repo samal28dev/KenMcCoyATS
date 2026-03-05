@@ -1,4 +1,4 @@
-import { format, parse } from 'date-fns'
+import { format, isValid, parse } from 'date-fns'
 import { Calendar as CalendarIcon } from 'lucide-react'
 import * as React from 'react'
 import type { DateRange } from 'react-day-picker'
@@ -22,7 +22,10 @@ export function DateInput({ value, onChange, placeholder = 'Pick a date', classN
 
   const selected = React.useMemo(() => {
     if (!value) return undefined
-    try { return parse(value, 'yyyy-MM-dd', new Date()) } catch { return undefined }
+    try {
+      const d = parse(value, 'yyyy-MM-dd', new Date())
+      return isValid(d) ? d : undefined
+    } catch { return undefined }
   }, [value])
 
   const handleSelect = (day: Date | undefined) => {

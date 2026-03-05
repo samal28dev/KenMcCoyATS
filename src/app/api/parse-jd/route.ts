@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        // Parse the JD text
-        const parser = new JDParser(process.env.OPENAI_API_KEY)
+        // Parse the JD text (uses Groq/llama-3.3-70b-versatile when GROQ_API_KEY is set)
+        const parser = new JDParser(process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY)
         const data = await parser.parseJD(jdText, file.name)
 
         return NextResponse.json({ data })

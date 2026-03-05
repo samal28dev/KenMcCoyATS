@@ -63,14 +63,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
             return NextResponse.json({ message: 'Invalid email format' }, { status: 400 })
         }
 
-        // Auto-calculate age from DOB
-        if (body.dob) {
+        // Sanitize dob — AI may return the string "null"
+        if (!body.dob || body.dob === 'null' || body.dob === '') {
+            delete body.dob
+            delete body.age
+        } else {
+            // Auto-calculate age from DOB
             const dob = new Date(body.dob)
-            const today = new Date()
-            let age = today.getFullYear() - dob.getFullYear()
-            const monthDiff = today.getMonth() - dob.getMonth()
-            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) age--
-            body.age = age
+            if (isNaN(dob.getTime())) {
+                delete body.dob
+                delete body.age
+            } else {
+                const today = new Date()
+                let age = today.getFullYear() - dob.getFullYear()
+                const monthDiff = today.getMonth() - dob.getMonth()
+                if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) age--
+                body.age = age
+            }
         }
 
         // Admin lock/unlock toggle — spec: "system admin can lock or unlock"

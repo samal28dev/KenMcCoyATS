@@ -122,8 +122,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Parse the resume
-    const parser = new ResumeParser(process.env.OPENAI_API_KEY)
+    // Parse the resume (uses Groq/llama-3.3-70b-versatile when GROQ_API_KEY is set)
+    const parser = new ResumeParser(process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY)
     const parsedResume = await parser.parseResume(resumeText, file.name)
 
     return NextResponse.json({
@@ -146,13 +146,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper endpoint to check if OpenAI is configured
+// Helper endpoint to check if AI parsing is configured
 export async function GET() {
+  const hasGroq = !!process.env.GROQ_API_KEY
   const hasOpenAI = !!process.env.OPENAI_API_KEY
+  const aiEnabled = hasGroq || hasOpenAI
+  const provider = hasGroq ? 'Groq (llama-3.3-70b-versatile)' : hasOpenAI ? 'OpenAI (gpt-4o-mini)' : null
   return NextResponse.json({
-    aiEnabled: hasOpenAI,
-    message: hasOpenAI
-      ? 'AI resume parsing is enabled'
-      : 'AI parsing not configured. Using basic parser. Add OPENAI_API_KEY to enable AI parsing.',
+    aiEnabled,
+    provider,
+    message: aiEnabled
+      ? `AI resume parsing is enabled via ${provider}`
+      : 'AI parsing not configured. Using basic parser. Add GROQ_API_KEY or OPENAI_API_KEY to enable AI parsing.',
   })
 }
