@@ -31,6 +31,12 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
     const [showPhone, setShowPhone] = useState(false)
     const [isCreatingList, setIsCreatingList] = useState(false)
     const [newListName, setNewListName] = useState('')
+    const [cvError, setCvError] = useState(false)
+    const [cvBlobUrl, setCvBlobUrl] = useState<string | null>(null)
+    const [cvLoading, setCvLoading] = useState(false)
+    const [maskPii, setMaskPii] = useState(false)
+    const [isEditing, setIsEditing] = useState(false)
+    const [editForm, setEditForm] = useState<any>({})
     const queryClient = useQueryClient()
 
     const saveMutation = useMutation({
@@ -61,6 +67,23 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
             }
             toast.error(err.message)
         }
+    })
+
+    const editMutation = useMutation({
+        mutationFn: async (data: any) => {
+            const res = await apiFetch(`/api/candidates/${id}`, {
+                method: 'PATCH',
+                body: JSON.stringify(data),
+            })
+            if (!res.ok) throw new Error('Failed to update profile')
+            return res.json()
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['candidate', id] })
+            setIsEditing(false)
+            toast.success('Profile updated successfully')
+        },
+        onError: (err: Error) => toast.error(err.message),
     })
 
     const { data: lists, isLoading: isLoadingLists } = useQuery({
@@ -117,6 +140,22 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
         },
         retry: 1,
     })
+
+    // Fetch CV as blob when CV tab is active so auth cookies are sent via apiFetch
+    // Uses /api/files/view which always watermarks and optionally masks PII
+    useEffect(() => {
+        if (activeTab !== 'cv' || !candidate) return
+        const storageId = candidate.resumePdfVersion || candidate.resumeFile
+        if (!storageId || !/\.pdf$/i.test(candidate.resumeFilename || storageId)) return
+        setCvBlobUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null })
+        setCvError(false)
+        setCvLoading(true)
+        apiFetch(`/api/files/view/${storageId}${maskPii ? '?mask=true' : ''}`)
+            .then(res => { if (!res.ok) throw new Error('not ok'); return res.blob() })
+            .then(blob => setCvBlobUrl(URL.createObjectURL(blob)))
+            .catch(() => setCvError(true))
+            .finally(() => setCvLoading(false))
+    }, [activeTab, candidate?.resumePdfVersion, candidate?.resumeFile, candidate?.resumeFilename, maskPii])
 
     if (isLoading) {
         return <AppShell><div className="flex items-center justify-center min-h-screen bg-[#f3f6f9]"><p className="text-gray-500">Loading profile...</p></div></AppShell>
@@ -442,16 +481,121 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                     {/* CARD 1: Profile Header */}
                     <div className="bg-card rounded-lg border border-border shadow-sm overflow-hidden">
                         <div className="p-6 relative">
-                            {/* Save Button Top Right */}
-                            <button
-                                onClick={() => saveMutation.mutate(!candidate.isSaved)}
-                                disabled={saveMutation.isPending}
-                                className={`absolute top-6 right-6 flex items-center gap-1.5 py-1.5 px-3 rounded-md border font-medium text-[14px] transition-all shadow-sm ${candidate.isSaved ? 'bg-primary border-primary text-primary-foreground' : 'bg-card border-border text-foreground hover:bg-accent'}`}
-                            >
-                                <Bookmark className={`w-4 h-4 ${candidate.isSaved ? 'fill-current' : ''}`} />
-                                {candidate.isSaved ? 'Saved' : 'Save'}
-                            </button>
+                            {/* Save & Edit Buttons Top Right */}
+                            <div className="absolute top-6 right-6 flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        setEditForm({
+                                            name: candidate.name || '',
+                                            designation: candidate.designation || '',
+                                            currentCompany: candidate.currentCompany || '',
+                                            experience: candidate.experience || '',
+                                            ctc: candidate.ctc ? (candidate.ctc / 100000).toFixed(2) : '',
+                                            noticePeriod: candidate.noticePeriod || '',
+                                            location: candidate.location || '',
+                                            phone: candidate.phone || '',
+                                            email: candidate.email || '',
+                                            skills: (candidate.skills || []).join(', '),
+                                            summary: candidate.summary || '',
+                                        })
+                                        setIsEditing(true)
+                                    }}
+                                    className="flex items-center gap-1.5 py-1.5 px-3 rounded-md border border-border bg-card text-foreground font-medium text-[14px] hover:bg-accent shadow-sm transition-all"
+                                >
+                                    Edit Profile
+                                </button>
+                                <button
+                                    onClick={() => saveMutation.mutate(!candidate.isSaved)}
+                                    disabled={saveMutation.isPending}
+                                    className={`flex items-center gap-1.5 py-1.5 px-3 rounded-md border font-medium text-[14px] transition-all shadow-sm ${candidate.isSaved ? 'bg-primary border-primary text-primary-foreground' : 'bg-card border-border text-foreground hover:bg-accent'}`}
+                                >
+                                    <Bookmark className={`w-4 h-4 ${candidate.isSaved ? 'fill-current' : ''}`} />
+                                    {candidate.isSaved ? 'Saved' : 'Save'}
+                                </button>
+                            </div>
 
+                            {isEditing ? (
+                                /* ── EDIT FORM ──────────────────────────────── */
+                                <div className="mt-2 pr-44">
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div className="col-span-2">
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Full Name</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.name || ''} onChange={e => setEditForm((f: any) => ({ ...f, name: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Designation / Title</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.designation || ''} onChange={e => setEditForm((f: any) => ({ ...f, designation: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Current Company</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.currentCompany || ''} onChange={e => setEditForm((f: any) => ({ ...f, currentCompany: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Experience (years)</label>
+                                            <input type="number" min="0" className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.experience || ''} onChange={e => setEditForm((f: any) => ({ ...f, experience: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">CTC (in Lakhs)</label>
+                                            <input type="number" min="0" step="0.01" className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.ctc || ''} onChange={e => setEditForm((f: any) => ({ ...f, ctc: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Notice Period</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="e.g. 30 days" value={editForm.noticePeriod || ''} onChange={e => setEditForm((f: any) => ({ ...f, noticePeriod: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Location</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.location || ''} onChange={e => setEditForm((f: any) => ({ ...f, location: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Phone</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.phone || ''} onChange={e => setEditForm((f: any) => ({ ...f, phone: e.target.value }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Email</label>
+                                            <input type="email" className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" value={editForm.email || ''} onChange={e => setEditForm((f: any) => ({ ...f, email: e.target.value }))} />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Skills (comma-separated)</label>
+                                            <input className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="React, Node.js, Python..." value={editForm.skills || ''} onChange={e => setEditForm((f: any) => ({ ...f, skills: e.target.value }))} />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="block text-[12px] font-semibold text-muted-foreground mb-1">Summary</label>
+                                            <textarea rows={3} className="w-full border border-border rounded-md px-3 py-2 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" value={editForm.summary || ''} onChange={e => setEditForm((f: any) => ({ ...f, summary: e.target.value }))} />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => {
+                                                const payload: any = {
+                                                    name: editForm.name,
+                                                    designation: editForm.designation,
+                                                    currentCompany: editForm.currentCompany,
+                                                    experience: editForm.experience ? Number(editForm.experience) : undefined,
+                                                    ctc: editForm.ctc ? Math.round(Number(editForm.ctc) * 100000) : undefined,
+                                                    noticePeriod: editForm.noticePeriod,
+                                                    location: editForm.location,
+                                                    phone: editForm.phone,
+                                                    email: editForm.email,
+                                                    skills: editForm.skills ? editForm.skills.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
+                                                    summary: editForm.summary,
+                                                }
+                                                editMutation.mutate(payload)
+                                            }}
+                                            disabled={editMutation.isPending}
+                                            className="px-5 py-2 bg-primary text-primary-foreground rounded-md font-bold text-[14px] hover:opacity-90 shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {editMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                            Save Changes
+                                        </button>
+                                        <button
+                                            onClick={() => setIsEditing(false)}
+                                            className="px-5 py-2 bg-muted text-muted-foreground rounded-md font-bold text-[14px] hover:bg-muted/80 shadow-sm transition-all flex items-center gap-2"
+                                        >
+                                            <X className="w-4 h-4" /> Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
                             <div className="flex gap-6">
                                 {/* Circular Avatar */}
                                 <div className="shrink-0">
@@ -534,6 +678,7 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                                     </div>
                                 </div>
                             </div>
+                            )}
                         </div>
 
                         {/* Visual Experience Timeline */}
@@ -618,7 +763,7 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                                 Profile detail
                             </button>
                             <button
-                                onClick={() => setActiveTab('cv')}
+                                onClick={() => { setActiveTab('cv'); setCvError(false); setCvBlobUrl(null); setMaskPii(false) }}
                                 className={`px-4 py-3 font-medium text-[15px] border-b-2 transition-colors ${activeTab === 'cv' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
                             >
                                 Attached CV
@@ -815,37 +960,6 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                                         </div>
                                     )}
 
-                                    {/* IT Skills - Simplified if real data not nested */}
-                                    {keySkills.length > 0 && (
-                                        <div>
-                                            <h3 className="text-[16px] font-bold text-foreground mb-4">IT skills</h3>
-                                            <div className="border border-border rounded-lg overflow-hidden">
-                                                <table className="w-full text-left text-[14px]">
-                                                    <thead className="bg-muted/30">
-                                                        <tr>
-                                                            <th className="py-3 px-4 font-normal text-muted-foreground border-b border-border">Skills</th>
-                                                            <th className="py-3 px-4 font-normal text-muted-foreground border-b border-border">Version</th>
-                                                            <th className="py-3 px-4 font-normal text-muted-foreground border-b border-border">Last Used</th>
-                                                            <th className="py-3 px-4 font-normal text-muted-foreground border-b border-border">Experience</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {keySkills.map((skill: string, idx: number) => (
-                                                            <tr key={idx} className="hover:bg-muted/10 transition-colors">
-                                                                <td className={`py-3 px-4 font-medium text-foreground ${idx < keySkills.length - 1 ? 'border-b border-border/50' : ''}`}>
-                                                                    <HighlightText text={skill} queries={queries} />
-                                                                </td>
-                                                                <td className={`py-3 px-4 text-muted-foreground ${idx < keySkills.length - 1 ? 'border-b border-border/50' : ''}`}>--</td>
-                                                                <td className={`py-3 px-4 text-muted-foreground ${idx < keySkills.length - 1 ? 'border-b border-border/50' : ''}`}>--</td>
-                                                                <td className={`py-3 px-4 text-muted-foreground ${idx < keySkills.length - 1 ? 'border-b border-border/50' : ''}`}>--</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    )}
-
                                     {/* Other Details */}
                                     {(candidate.dob || candidate.noticePeriod || candidate.alternativeMobile) && (
                                         <div className="pt-6 border-t border-[#e2e8f0] space-y-8">
@@ -927,12 +1041,22 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                                     </div>
                                     <div className="bg-muted/50 rounded-lg border border-border p-6 flex items-center justify-between">
                                         <div className="flex items-center gap-2 text-[14px] text-muted-foreground">
-                                            <input type="checkbox" id="mask" className="w-4 h-4 rounded border-border" />
-                                            <label htmlFor="mask">Mask personal information</label>
-                                            <div className="w-4 h-4 border border-muted-foreground/40 rounded-full flex items-center justify-center text-[10px] text-muted-foreground font-bold ml-1">i</div>
+                                            <input
+                                                type="checkbox"
+                                                id="mask"
+                                                checked={maskPii}
+                                                onChange={e => setMaskPii(e.target.checked)}
+                                                className="w-4 h-4 rounded border-border cursor-pointer"
+                                            />
+                                            <label htmlFor="mask" className="cursor-pointer select-none">
+                                                {cvLoading && maskPii !== false ? 'Masking...' : 'Mask personal information'}
+                                            </label>
+                                            <div className="w-4 h-4 border border-muted-foreground/40 rounded-full flex items-center justify-center text-[10px] text-muted-foreground font-bold ml-1" title="Hides email, phone and social links from the CV preview and download">
+                                                i
+                                            </div>
                                         </div>
                                         <a
-                                            href={candidate.resumeFile ? `/api/files/download/${candidate.resumeFile}` : '#'}
+                                            href={(candidate.resumePdfVersion || candidate.resumeFile) ? `/api/files/view/${candidate.resumePdfVersion || candidate.resumeFile}${maskPii ? '?mask=true' : ''}` : '#'}
                                             target="_blank"
                                             rel="noopener"
                                             className="px-6 py-2.5 bg-primary text-primary-foreground border border-primary rounded-md font-bold text-[14px] flex items-center gap-2 hover:opacity-90 transition-all shadow-sm"
@@ -941,24 +1065,55 @@ function CandidateDetailContent({ params }: { params: Promise<{ id: string }> })
                                         </a>
                                     </div>
 
-                                    {/* Real PDF Resume Embed */}
-                                    <div className="mt-6 border border-border rounded-lg overflow-hidden bg-muted/20" style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}>
-                                        {candidate.resumeFile ? (
-                                            <iframe
-                                                src={`/api/files/download/${candidate.resumeFile}#toolbar=0&navpanes=0`}
-                                                className="w-full h-full border-none"
-                                                title="Resume Document"
-                                            />
-                                        ) : (
-                                            <div className="flex flex-col items-center justify-center h-full p-12 text-center">
-                                                <FileText className="w-16 h-16 text-muted-foreground/20 mb-4" />
-                                                <p className="text-muted-foreground">No original resume file found in database.</p>
+                                    {/* CV Preview — blob URL approach avoids iframe auth/cookie issues */}
+                                    {(() => {
+                                        const hasPdf = !!(candidate.resumePdfVersion ||
+                                            /\.pdf$/i.test(candidate.resumeFilename || candidate.resumeFile || ''))
+                                        const isNonPdf = candidate.resumeFile && !hasPdf
+                                        const noFile = !candidate.resumeFile
+                                        return (
+                                            <div className="mt-6 border border-border rounded-lg overflow-hidden bg-muted/20" style={{ height: 'calc(100vh - 300px)', minHeight: '600px' }}>
+                                                {noFile ? (
+                                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center">
+                                                        <FileText className="w-16 h-16 text-muted-foreground/20 mb-4" />
+                                                        <p className="text-muted-foreground">No resume file attached to this candidate.</p>
+                                                    </div>
+                                                ) : isNonPdf ? (
+                                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center gap-4">
+                                                        <FileText className="w-16 h-16 text-muted-foreground/20" />
+                                                        <p className="text-muted-foreground text-sm">This CV is in {(candidate.resumeFilename || candidate.resumeFile || '').split('.').pop()?.toUpperCase()} format — preview not available.</p>
+                                                        <a href={`/api/files/download/${candidate.resumePdfVersion || candidate.resumeFile}`} target="_blank" rel="noopener noreferrer"
+                                                            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:opacity-90 flex items-center gap-2">
+                                                            <Download className="w-4 h-4" /> Download to View
+                                                        </a>
+                                                    </div>
+                                                ) : cvLoading ? (
+                                                    <div className="flex items-center justify-center h-full">
+                                                        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                                                    </div>
+                                                ) : cvError ? (
+                                                    <div className="flex flex-col items-center justify-center h-full p-12 text-center gap-4">
+                                                        <FileText className="w-16 h-16 text-muted-foreground/20" />
+                                                        <p className="text-muted-foreground text-sm">Unable to load the CV preview.</p>
+                                                        <a href={`/api/files/download/${candidate.resumePdfVersion || candidate.resumeFile}`} target="_blank" rel="noopener noreferrer"
+                                                            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:opacity-90 flex items-center gap-2">
+                                                            <Download className="w-4 h-4" /> Open / Download CV
+                                                        </a>
+                                                    </div>
+                                                ) : cvBlobUrl ? (
+                                                    <iframe
+                                                        key={cvBlobUrl}
+                                                        src={`${cvBlobUrl}#toolbar=0&navpanes=0`}
+                                                        className="w-full h-full border-none"
+                                                        title="Resume Document"
+                                                    />
+                                                ) : null}
                                             </div>
-                                        )}
-                                    </div>
+                                        )
+                                    })()}
                                     <div className="mt-4 flex justify-center">
                                         <a
-                                            href={candidate.resumeFile ? `/api/files/download/${candidate.resumeFile}` : '#'}
+                                            href={(candidate.resumePdfVersion || candidate.resumeFile) ? `/api/files/view/${candidate.resumePdfVersion || candidate.resumeFile}${maskPii ? '?mask=true' : ''}` : '#'}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="text-primary text-sm font-medium hover:underline flex items-center gap-1"

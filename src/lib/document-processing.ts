@@ -81,13 +81,6 @@ export async function addWatermarkToPdf(inputFilename: string): Promise<string> 
             x: 12, y: height - 20, size: 10, font,
             color: rgb(0.2, 0.2, 0.5),
         })
-        // Right-aligned branding
-        const rightText = 'kenmccoy.in'
-        const rightWidth = lightFont.widthOfTextAtSize(rightText, 8)
-        page.drawText(rightText, {
-            x: width - rightWidth - 12, y: height - 19, size: 8, font: lightFont,
-            color: rgb(0.4, 0.4, 0.6),
-        })
         // Thin line under header
         page.drawLine({
             start: { x: 0, y: height - 28 },
@@ -147,18 +140,21 @@ export async function addWatermarkToPdf(inputFilename: string): Promise<string> 
                 const logoBytes = fs.readFileSync(logoPath)
                 const logoImage = await pdfDoc.embedJpg(logoBytes)
 
-                // Desired logo size
-                const logoScale = 0.18
-                const logoWidth = logoImage.width * logoScale
-                const logoHeight = logoImage.height * logoScale
+                // Scale logo to fit inside the 28px header bar (22px usable height)
+                const logoScale = 0.28
+                const rawLogoHeight = logoImage.height * logoScale
+                const maxLogoHeight = 22
+                const fitScale = rawLogoHeight > maxLogoHeight ? maxLogoHeight / logoImage.height : logoScale
+                const logoWidth = logoImage.width * fitScale
+                const logoHeight = logoImage.height * fitScale
 
                 console.log(`[Watermark] Drawing logo on page sized: ${width}x${height}`)
                 page.drawImage(logoImage, {
                     x: width - logoWidth - 10,
-                    y: 25, // Adjusted to be above the footer line
+                    y: height - logoHeight - 4, // top-right, inside header bar
                     width: logoWidth,
                     height: logoHeight,
-                    opacity: 0.15,
+                    opacity: 0.9,
                 })
                 console.log('[Watermark] drawImage called successfully')
             } else {

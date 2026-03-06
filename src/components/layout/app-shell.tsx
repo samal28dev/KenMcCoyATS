@@ -20,6 +20,7 @@ import {
   Users,
   X,
   CheckSquare,
+  ListOrdered,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -33,6 +34,7 @@ const navigation = [
   { name: 'Clients', href: '/clients', icon: Building2 },
   { name: 'Positions', href: '/positions', icon: Briefcase },
   { name: 'Candidates', href: '/candidates', icon: Users },
+  { name: 'Candidate Lists', href: '/candidates/lists', icon: ListOrdered },
   { name: 'Tasks', href: '/tasks', icon: CheckSquare },
   { name: 'Reports', href: '/reports', icon: FileBarChart2 },
   { name: 'Settings', href: '/settings', icon: Settings },

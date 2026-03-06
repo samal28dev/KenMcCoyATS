@@ -268,6 +268,7 @@ export default function CandidatesPage() {
             const uploadData = await uploadRes.json()
             const pdfVer = uploadData.file?.pdfVersion || ''
             const docxVer = uploadData.file?.docxVersion || ''
+            const watermarkedVer = uploadData.file?.watermarkedVersion || ''
 
             // Parse resume
             const parseFd = new FormData()
@@ -313,6 +314,8 @@ export default function CandidatesPage() {
                         : (Array.isArray(data.skills) ? data.skills.join(', ') : prev.skills),
                     resumeFile: uploadData.storageId,
                     resumeFilename: file.name,
+                    resumePdfVersion: watermarkedVer || pdfVer,
+                    resumeDocVersion: docxVer,
                     summary: data.summary || prev.summary,
                     workExperience: data.experience || [],
                     education: data.education || [],
@@ -324,7 +327,7 @@ export default function CandidatesPage() {
                     ...prev,
                     resumeFile: uploadData.storageId,
                     resumeFilename: file.name,
-                    resumePdfVersion: pdfVer,
+                    resumePdfVersion: watermarkedVer || pdfVer,
                     resumeDocVersion: docxVer,
                 }))
             }
@@ -661,9 +664,12 @@ export default function CandidatesPage() {
                                 <button onClick={() => { setEditingBulkId(null); resetForm(); setShowCreate(true) }} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground mr-8">
                                     Add Candidate
                                 </button>
-                                <button onClick={() => setShowBulkUpload(true)} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground">
+                                <button onClick={() => setShowBulkUpload(true)} className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground mr-8">
                                     Bulk Upload
                                 </button>
+                                <Link href="/candidates/lists" className="px-0 py-3.5 text-sm text-muted-foreground hover:text-foreground">
+                                    Manage Lists
+                                </Link>
                             </div>
                         </div>
 
@@ -1155,7 +1161,7 @@ export default function CandidatesPage() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-start justify-between gap-3 mb-1">
                                                         <div className="flex items-center gap-3">
-                                                            <Link href={`/candidates/${c._id}`} className="text-[1.0625rem] font-bold text-[#0973a8] hover:underline dark:text-blue-400">
+                                                            <Link href={`/candidates/${c._id}${[appliedFilters.search, appliedFilters.skills].filter(Boolean).join(',') ? `?q=${encodeURIComponent([appliedFilters.search, appliedFilters.skills].filter(Boolean).join(','))}` : ''}`} className="text-[1.0625rem] font-bold text-[#0973a8] hover:underline dark:text-blue-400">
                                                                 <HighlightText text={c.name} queries={[search]} />
                                                             </Link>
                                                             {c.experience != null && (
@@ -1231,7 +1237,7 @@ export default function CandidatesPage() {
                                                     </div>
 
                                                     <div className="flex items-center gap-5 mt-5">
-                                                        <Link href={`/candidates/${c._id}`} className="flex items-center gap-1.5 text-xs font-bold text-[#0973a8] hover:underline">
+                                                        <Link href={`/candidates/${c._id}${[appliedFilters.search, appliedFilters.skills].filter(Boolean).join(',') ? `?q=${encodeURIComponent([appliedFilters.search, appliedFilters.skills].filter(Boolean).join(','))}` : ''}`} className="flex items-center gap-1.5 text-xs font-bold text-[#0973a8] hover:underline">
                                                             Full Profile <ChevronRight className="h-3 w-3" />
                                                         </Link>
                                                         <div className="h-3 w-px bg-border" />

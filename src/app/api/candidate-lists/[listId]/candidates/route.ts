@@ -39,3 +39,34 @@ export async function POST(req: Request, { params }: { params: Promise<{ listId:
         return NextResponse.json({ message: error.message || 'Server error' }, { status: 500 });
     }
 }
+
+// DELETE /api/candidate-lists/[listId]/candidates — remove a candidate from the list
+export async function DELETE(req: Request, { params }: { params: Promise<{ listId: string }> }) {
+    try {
+        const user = await verifyAuth();
+        if (!user) return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+
+        await dbConnect();
+
+        const { listId } = await params;
+        const body = await req.json();
+        const { candidateId } = body;
+
+        if (!candidateId) {
+            return NextResponse.json({ message: 'Candidate ID is required' }, { status: 400 });
+        }
+
+        const list = await CandidateList.findOne({ _id: listId, createdBy: user.id });
+        if (!list) return NextResponse.json({ message: 'List not found' }, { status: 404 });
+
+        list.candidates = list.candidates.filter(
+            (id: any) => id.toString() !== candidateId
+        );
+        await list.save();
+
+        return NextResponse.json({ message: 'Candidate removed from list', list });
+    } catch (error: any) {
+        console.error('Error removing candidate from list:', error);
+        return NextResponse.json({ message: error.message || 'Server error' }, { status: 500 });
+    }
+}
