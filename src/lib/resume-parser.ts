@@ -47,6 +47,7 @@ export interface ParsedResume {
   yearsOfExperience: number
   currentRole?: string
   currentCompany?: string
+  industry?: string
   qualification?: string
   allQualifications?: string[]
   ctc?: number
@@ -117,6 +118,7 @@ JSON OUTPUT FORMAT (return exactly this structure):
   "yearsOfExperience": 0,
   "currentRole": "Most recent or current job title. Empty string if fresher with no experience.",
   "currentCompany": "Most recent or current employer. Empty string if fresher with no experience.",
+  "industry": "The industry the candidate typically works in (e.g. 'IT', 'Banking', 'Manufacturing'). null if not clear.",
   "qualification": "Highest qualification as a short label (e.g. 'B.Tech in Computer Science', 'MBA - Finance', 'MCA'). Empty string if not found.",
   "allQualifications": ["All degrees/qualifications found, highest first. Each as a short label like 'B.Tech - CSE', 'MBA', '12th - CBSE', '10th'. Do NOT include institution names here."],
   "ctc": null,
@@ -401,6 +403,7 @@ class ResumeParser {
       yearsOfExperience: ai.yearsOfExperience || basic.yearsOfExperience,
       currentRole: pickValid(ai.currentRole, basic.currentRole),
       currentCompany: pickValid(ai.currentCompany, basic.currentCompany),
+      industry: pick(ai.industry, undefined),
       qualification: pickValid(ai.qualification, basic.qualification),
       allQualifications: [...new Set(
         [...(ai.allQualifications || []), ...(basic.allQualifications || [])]

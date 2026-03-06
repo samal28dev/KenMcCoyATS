@@ -3,6 +3,9 @@ import dbConnect from '../../../../lib/db'
 import Candidate from '../../../../models/Candidate'
 import CandidatePosition from '../../../../models/CandidatePosition'
 import Timeline from '../../../../models/Timeline'
+import Position from '../../../../models/Position'
+import Client from '../../../../models/Client'
+import User from '../../../../models/User'
 import { verifyAuth } from '../../../../lib/auth'
 import { notifyHierarchy, notifyUser } from '../../../../lib/notify'
 import { emitRealtimeEvent } from '@/lib/socket'
@@ -17,6 +20,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         await dbConnect()
         const { id } = await params
 
+        console.log('[Candidate GET] Fetching candidate:', id)
+
         const candidate = await Candidate.findById(id)
             .populate('assignedTo', 'name email role')
             .populate('positionId', 'title')
@@ -25,6 +30,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             .populate('lastParsedBy', 'name email')
             .populate('lockedByPosition', 'title')
             .lean()
+
+        console.log('[Candidate GET] Candidate found:', !!candidate)
 
         if (!candidate) return NextResponse.json({ message: 'Candidate not found' }, { status: 404 })
 
@@ -35,16 +42,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             .sort({ createdAt: -1 })
             .lean()
 
+        console.log('[Candidate GET] Positions found:', positions.length)
+
         // Get timeline entries
         const timeline = await Timeline.find({ candidateId: id })
             .populate('performedBy', 'name')
             .sort({ date: -1 })
             .lean()
 
+        console.log('[Candidate GET] Timeline entries:', timeline.length)
+
         return NextResponse.json({ ...candidate, positions, timeline })
     } catch (error) {
-        console.error('Candidate get error:', error)
-        return NextResponse.json({ message: 'Internal server error' }, { status: 500 })
+        console.error('[Candidate GET] Error:', error instanceof Error ? error.message : error)
+        console.error('[Candidate GET] Stack:', error instanceof Error ? error.stack : '')
+        return NextResponse.json({ message: `Internal server error: ${error instanceof Error ? error.message : 'unknown'}` }, { status: 500 })
     }
 }
 

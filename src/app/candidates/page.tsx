@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, X, Upload, Loader2, Mail, Download, Briefcase, CheckSquare, LayoutGrid, List, AlignJustify, Clock, ChevronUp, Phone, FileText, MessageSquare, Bell } from 'lucide-react'
+import { Search, Plus, X, Upload, Loader2, Mail, Download, Briefcase, CheckSquare, LayoutGrid, List, AlignJustify, Clock, ChevronUp, Phone, FileText, MessageSquare, Bell, ChevronRight, MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
 import { AppShell } from '@/components/layout/app-shell'
@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DateInput } from '@/components/ui/date-picker'
 import { toast } from 'sonner'
+import { HighlightText } from '@/components/ui/highlight-text'
 
 const COUNTRY_CODES = ['+91', '+1', '+44', '+61', '+971', '+65', '+49', '+33', '+86', '+81']
 
@@ -76,13 +77,14 @@ export default function CandidatesPage() {
     const [bulkEmailSubject, setBulkEmailSubject] = useState('')
     const [bulkEmailContent, setBulkEmailContent] = useState('')
 
-    const [form, setForm] = useState({
+    const [form, setForm] = useState<any>({
         name: '', email: '', phone: '', alternativeMobile: '',
         countryCode: '+91', alternativeCountryCode: '+91',
         designation: '', currentCompany: '', location: '',
         experience: '', ctc: '', noticePeriod: '', dob: '',
         qualifications: '', skills: '', resumeFile: '', resumeFilename: '',
         resumePdfVersion: '', resumeDocVersion: '',
+        summary: '', workExperience: [], education: [], projects: []
     })
 
     // Bulk upload state
@@ -245,7 +247,7 @@ export default function CandidatesPage() {
     })
 
     const resetForm = () => {
-        setForm({ name: '', email: '', phone: '', alternativeMobile: '', countryCode: '+91', alternativeCountryCode: '+91', designation: '', currentCompany: '', location: '', experience: '', ctc: '', noticePeriod: '', dob: '', qualifications: '', skills: '', resumeFile: '', resumeFilename: '', resumePdfVersion: '', resumeDocVersion: '' })
+        setForm({ name: '', email: '', phone: '', alternativeMobile: '', countryCode: '+91', alternativeCountryCode: '+91', designation: '', currentCompany: '', location: '', experience: '', ctc: '', noticePeriod: '', dob: '', qualifications: '', skills: '', resumeFile: '', resumeFilename: '', resumePdfVersion: '', resumeDocVersion: '', summary: '', workExperience: [], education: [], projects: [] })
     }
 
     const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -286,7 +288,7 @@ export default function CandidatesPage() {
                 const fallbackRole = currentExp?.title || ''
                 const fallbackCompany = currentExp?.company || ''
 
-                setForm(prev => ({
+                setForm((prev: any) => ({
                     ...prev,
                     name: (data.personalInfo?.firstName && data.personalInfo?.lastName)
                         ? `${data.personalInfo.firstName} ${data.personalInfo.lastName}`
@@ -311,10 +313,14 @@ export default function CandidatesPage() {
                         : (Array.isArray(data.skills) ? data.skills.join(', ') : prev.skills),
                     resumeFile: uploadData.storageId,
                     resumeFilename: file.name,
+                    summary: data.summary || prev.summary,
+                    workExperience: data.experience || [],
+                    education: data.education || [],
+                    projects: data.projects || [],
                 }))
             } else {
                 toast.info('Resume uploaded but parsing had issues — fill fields manually')
-                setForm(prev => ({
+                setForm((prev: any) => ({
                     ...prev,
                     resumeFile: uploadData.storageId,
                     resumeFilename: file.name,
@@ -391,6 +397,10 @@ export default function CandidatesPage() {
                             : (Array.isArray(data.skills) ? data.skills.join(', ') : ''),
                         resumeFile: uploadData.storageId,
                         resumeFilename: item.file.name,
+                        summary: data.summary || '',
+                        workExperience: data.experience || [],
+                        education: data.education || [],
+                        projects: data.projects || [],
                     }
                     setBulkResults(prev => [...prev, parsedCandidate])
                     setBulkQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'done' } : q))
@@ -420,6 +430,10 @@ export default function CandidatesPage() {
                         noticePeriod: c.noticePeriod ? Number(c.noticePeriod) : undefined,
                         qualifications: c.qualifications ? c.qualifications.split(',').map((q: any) => q.trim()).filter(Boolean) : [],
                         skills: c.skills ? c.skills.split(',').map((s: any) => s.trim()).filter(Boolean) : [],
+                        summary: c.summary,
+                        workExperience: c.workExperience,
+                        education: c.education,
+                        projects: c.projects,
                     }),
                 })
                 saved++
@@ -509,8 +523,8 @@ export default function CandidatesPage() {
             ctc: form.ctc ? Number(form.ctc) : undefined,
             noticePeriod: form.noticePeriod ? Number(form.noticePeriod) : undefined,
             dob: form.dob || undefined,
-            qualifications: form.qualifications ? form.qualifications.split(',').map(q => q.trim()).filter(Boolean) : [],
-            skills: form.skills ? form.skills.split(',').map(s => s.trim()).filter(Boolean) : [],
+            qualifications: form.qualifications ? form.qualifications.split(',').map((q: string) => q.trim()).filter(Boolean) : [],
+            skills: form.skills ? form.skills.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
             resumeFile: form.resumeFile || undefined,
             resumeFilename: form.resumeFilename || undefined,
             resumePdfVersion: form.resumePdfVersion || undefined,
@@ -1128,9 +1142,9 @@ export default function CandidatesPage() {
                                     {displayCandidates.filter((c: any) => !hideProfiles).map((c: any) => {
                                         const skillsList: string[] = Array.isArray(c.skills) ? c.skills : (c.skills ? String(c.skills).split(',').map((s: string) => s.trim()).filter(Boolean) : [])
                                         const qualsList: string[] = Array.isArray(c.qualifications) ? c.qualifications : (c.qualifications ? String(c.qualifications).split(',').map((s: string) => s.trim()).filter(Boolean) : [])
-                                        const searchKeywords = (appliedFilters.skills || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+                                        const searchKeywords = (appliedFilters.skills || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
                                         return (
-                                            <div key={c._id} className={`flex gap-4 border-b border-border py-5 ${selectedIds.has(c._id) ? 'bg-blue-50/40 dark:bg-blue-950/10' : 'hover:bg-muted/20'}`}>
+                                            <div key={c._id} className={`flex gap-4 border-b border-border py-6 px-1 transition-all duration-200 ${selectedIds.has(c._id) ? 'bg-blue-50/40 dark:bg-blue-950/10' : 'hover:bg-muted/5'}`}>
                                                 {/* Checkbox */}
                                                 <div className="shrink-0 pt-1" onClick={e => e.stopPropagation()}>
                                                     <input type="checkbox" checked={selectedIds.has(c._id)} onChange={() => toggleSelect(c._id)}
@@ -1139,107 +1153,115 @@ export default function CandidatesPage() {
 
                                                 {/* Main content */}
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="flex items-start gap-3 mb-1.5">
-                                                        <Link href={`/candidates/${c._id}`} className="text-[1.0625rem] font-semibold text-blue-700 hover:underline dark:text-blue-400">
-                                                            {c.name}
-                                                        </Link>
-                                                        {c.experience != null && (
-                                                            <span className="text-xs px-2 py-0.5 rounded bg-[#f5f0e8] text-[#7a5c2a] font-medium dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap">
-                                                                {Math.floor(Number(c.experience))}y {Math.round((Number(c.experience) % 1) * 12)}m
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {c.designation && (
-                                                        <p className="text-sm text-muted-foreground mb-2">{c.designation}{c.currentCompany ? ` at ${c.currentCompany}` : ''}</p>
-                                                    )}
-
-                                                    <div className="space-y-1.5 text-sm">
-                                                        {c.currentCompany && (
-                                                            <div className="flex gap-2">
-                                                                <span className="text-muted-foreground w-28 shrink-0">Previous</span>
-                                                                <span>{c.currentCompany}</span>
-                                                            </div>
-                                                        )}
-                                                        {qualsList.length > 0 && (
-                                                            <div className="flex gap-2">
-                                                                <span className="text-muted-foreground w-28 shrink-0">Education</span>
-                                                                <span>{qualsList.join(' | ')}</span>
-                                                            </div>
-                                                        )}
-                                                        {c.location && (
-                                                            <div className="flex gap-2">
-                                                                <span className="text-muted-foreground w-28 shrink-0">Pref. locations</span>
-                                                                <span>{c.location}</span>
-                                                            </div>
-                                                        )}
-                                                        {skillsList.length > 0 && (
-                                                            <div className="flex gap-2">
-                                                                <span className="text-muted-foreground w-28 shrink-0">Key skills</span>
-                                                                <span className="flex-1">
-                                                                    {skillsList.slice(0, 10).map((sk, i) => (
-                                                                        <span key={sk}>
-                                                                            {i > 0 && <span className="text-muted-foreground mx-1">|</span>}
-                                                                            <span className={searchKeywords.some(kw => sk.toLowerCase().includes(kw)) ? 'font-semibold text-foreground' : 'text-muted-foreground'}>
-                                                                                {sk}
-                                                                            </span>
-                                                                        </span>
-                                                                    ))}
-                                                                    {skillsList.length > 10 && <button className="text-blue-600 hover:underline ml-1 text-xs">...more</button>}
+                                                    <div className="flex items-start justify-between gap-3 mb-1">
+                                                        <div className="flex items-center gap-3">
+                                                            <Link href={`/candidates/${c._id}`} className="text-[1.0625rem] font-bold text-[#0973a8] hover:underline dark:text-blue-400">
+                                                                <HighlightText text={c.name} queries={[search]} />
+                                                            </Link>
+                                                            {c.experience != null && (
+                                                                <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-100 dark:bg-blue-900/30 dark:text-blue-300 whitespace-nowrap">
+                                                                    {Number(c.experience) === 0 ? 'Fresher' : `${Math.floor(Number(c.experience))}y ${Math.round((Number(c.experience) % 1) * 12)}m`}
                                                                 </span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Bottom row */}
-                                                    <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground flex-wrap">
-                                                        <Link href={`/candidates/${c._id}`} className="text-blue-600 hover:underline">View profile</Link>
-                                                        <span>|</span>
-                                                        <button className="hover:underline">Comment</button>
-                                                        <button className="hover:underline">Save</button>
-                                                        <div className="ml-auto flex items-center gap-3">
-                                                            {c.ctc && <span>CTC: {(Number(c.ctc) / 100000).toFixed(1)} L</span>}
-                                                            {c.noticePeriod && <span>Notice: {c.noticePeriod}d</span>}
-                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${statusColors[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight ${statusColors[c.status] || 'bg-gray-100 text-gray-600'}`}>
+                                                                {c.status}
+                                                            </span>
                                                         </div>
                                                     </div>
 
-                                                    {/* Stats bar */}
-                                                    <div className="flex items-center gap-4 mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground flex-wrap">
-                                                        {c.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {c.email}</span>}
+                                                    <div className="flex items-center gap-2 text-sm font-medium text-foreground mb-3">
+                                                        <HighlightText text={c.designation} queries={[search]} />
+                                                        {c.currentCompany && (
+                                                            <>
+                                                                <span className="text-muted-foreground/40">|</span>
+                                                                <HighlightText text={c.currentCompany} queries={[search]} />
+                                                            </>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="space-y-2 text-sm">
+                                                        {c.workExperience && c.workExperience.length > 0 && (
+                                                            <div className="flex gap-2 items-start">
+                                                                <span className="text-muted-foreground w-28 shrink-0 text-xs font-semibold uppercase tracking-wider pt-0.5">Highlights</span>
+                                                                <div className="flex-1 text-muted-foreground line-clamp-2 italic">
+                                                                    {c.workExperience[0].highlights?.[0] || c.workExperience[0].description || 'Professional profile with cross-functional expertise.'}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {qualsList.length > 0 && (
+                                                            <div className="flex gap-2">
+                                                                <span className="text-muted-foreground w-28 shrink-0 text-xs font-semibold uppercase tracking-wider pt-0.5">Education</span>
+                                                                <span className="text-foreground/90">{qualsList.join(' | ')}</span>
+                                                            </div>
+                                                        )}
+
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            {c.location && (
+                                                                <div className="flex gap-2">
+                                                                    <span className="text-muted-foreground w-28 shrink-0 text-xs font-semibold uppercase tracking-wider pt-0.5">Location</span>
+                                                                    <span className="text-foreground/90">{c.location}</span>
+                                                                </div>
+                                                            )}
+                                                            {c.ctc != null && (
+                                                                <div className="flex gap-2">
+                                                                    <span className="text-muted-foreground w-28 shrink-0 text-xs font-semibold uppercase tracking-wider pt-0.5">Current CTC</span>
+                                                                    <span className="text-foreground/90">₹{(Number(c.ctc) / 100000).toFixed(1)} LPA</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {skillsList.length > 0 && (
+                                                            <div className="flex gap-2 items-start">
+                                                                <span className="text-muted-foreground w-28 shrink-0 text-xs font-semibold uppercase tracking-wider pt-0.5">Key skills</span>
+                                                                <div className="flex-1 flex flex-wrap gap-x-1.5 gap-y-1">
+                                                                    {skillsList.slice(0, 12).map((sk) => (
+                                                                        <span key={sk} className="flex items-center">
+                                                                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${searchKeywords.some(kw => sk.toLowerCase().includes(kw)) ? 'bg-blue-50 text-blue-700 border-blue-200 font-bold' : 'bg-muted/30 text-muted-foreground border-transparent'}`}>
+                                                                                <HighlightText text={sk} queries={[search]} />
+                                                                            </span>
+                                                                        </span>
+                                                                    ))}
+                                                                    {skillsList.length > 12 && <span className="text-[10px] text-muted-foreground self-center ml-1">+{skillsList.length - 12} more</span>}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex items-center gap-5 mt-5">
+                                                        <Link href={`/candidates/${c._id}`} className="flex items-center gap-1.5 text-xs font-bold text-[#0973a8] hover:underline">
+                                                            Full Profile <ChevronRight className="h-3 w-3" />
+                                                        </Link>
+                                                        <div className="h-3 w-px bg-border" />
+                                                        {c.email && (
+                                                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                                <Mail className="h-3 w-3" /> {c.email}
+                                                            </div>
+                                                        )}
                                                         {c.phone && (
-                                                            <a href={`tel:${c.countryCode || '+91'}${c.phone}`}
-                                                                className="flex items-center gap-1 hover:text-foreground transition-colors">
+                                                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                                                 <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
-                                                            </a>
+                                                            </div>
                                                         )}
-                                                        {c.updatedAt && (
-                                                            <span className="ml-auto">
-                                                                Active {Math.floor((Date.now() - new Date(c.updatedAt).getTime()) / 86400000)}d ago
-                                                            </span>
-                                                        )}
+                                                        <div className="ml-auto flex items-center gap-4 text-[10px] text-muted-foreground uppercase font-bold tracking-widest">
+                                                            {c.noticePeriod != null && <span>{c.noticePeriod === 0 ? 'Immediate' : `${c.noticePeriod} Days Notice`}</span>}
+                                                            {c.updatedAt && (
+                                                                <span>Modified {new Date(c.updatedAt).toLocaleDateString()}</span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
 
-                                                {/* Right action panel */}
-                                                <div className="shrink-0 flex flex-col items-center gap-2 w-36">
-                                                    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-lg font-semibold text-muted-foreground border border-border">
+                                                {/* Profile Initial / Quick Actions */}
+                                                <div className="shrink-0 flex flex-col items-center justify-between py-1 w-14">
+                                                    <div className="w-10 h-10 rounded bg-[#f0f4f8] border border-blue-100 flex items-center justify-center text-sm font-bold text-[#0973a8]">
                                                         {c.name?.charAt(0)?.toUpperCase()}
                                                     </div>
-                                                    <Link href={`/candidates/${c._id}`}
-                                                        className="w-full text-center px-3 py-1.5 text-xs border border-border rounded hover:bg-muted transition-colors">
-                                                        View profile
-                                                    </Link>
-                                                    {c.phone && (
-                                                        <a href={`tel:${c.countryCode || '+91'}${c.phone}`}
-                                                            className="w-full text-center px-3 py-1.5 text-xs border border-border rounded hover:bg-muted flex items-center justify-center gap-1.5">
-                                                            <Phone className="h-3 w-3" /> {c.countryCode || '+91'} {c.phone}
-                                                        </a>
-                                                    )}
-                                                    {c.email && (
-                                                        <p className="text-[10px] text-muted-foreground text-center flex items-center justify-center gap-1">
-                                                            <Mail className="h-2.5 w-2.5" /> Verified email
-                                                        </p>
-                                                    )}
+                                                    <button className="p-2 rounded-full hover:bg-muted text-muted-foreground transition-colors">
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </button>
                                                 </div>
                                             </div>
                                         )

@@ -43,12 +43,38 @@ const CandidateSchema = new mongoose.Schema({
     },
     location: { type: String },
 
-    // Professional info
+    // Professional info (Primary/Searchable)
     currentCompany: { type: String },
+    industry: { type: String },
     designation: { type: String },
     experience: { type: String },
-    qualifications: [{ type: String }],  // free-text — AI parser returns full degree names
+    qualifications: [{ type: String }],
     skills: [{ type: String }],
+    summary: { type: String },
+
+    // Structured history (Full timeline)
+    workExperience: [{
+        title: { type: String },
+        company: { type: String },
+        startDate: { type: String },
+        endDate: { type: String },
+        description: { type: String },
+        highlights: [{ type: String }]
+    }],
+    education: [{
+        institution: { type: String },
+        degree: { type: String },
+        field: { type: String },
+        startDate: { type: String },
+        endDate: { type: String },
+        gpa: { type: String }
+    }],
+    projects: [{
+        name: { type: String },
+        description: { type: String },
+        technologies: [{ type: String }],
+        url: { type: String }
+    }],
 
     // Compensation
     ctc: { type: Number },
@@ -94,6 +120,7 @@ const CandidateSchema = new mongoose.Schema({
     isLocked: { type: Boolean, default: false },
     lockedByPosition: { type: mongoose.Schema.Types.ObjectId, ref: 'Position' },
     lockedAt: { type: Date },
+    isSaved: { type: Boolean, default: false },
 
     // Metadata
     appliedDate: { type: Date, default: Date.now },
