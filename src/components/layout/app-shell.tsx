@@ -129,19 +129,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center justify-between px-5 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">KM</span>
-            </div>
-            <div>
-              <p className="text-sm font-semibold leading-tight">Ken McCoy</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Consulting ATS</p>
-            </div>
-          </div>
+        <div className="relative flex h-16 items-center justify-center px-5 border-b border-border shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-kmc.jpg" alt="Ken McCoy Logo" className="h-12 w-auto object-contain" />
           <button
             onClick={() => setSidebarOpen(false)}
-            className="p-1.5 rounded-md lg:hidden hover:bg-accent"
+            className="absolute right-3 p-1.5 rounded-md lg:hidden hover:bg-accent"
           >
             <X className="h-4 w-4" />
           </button>

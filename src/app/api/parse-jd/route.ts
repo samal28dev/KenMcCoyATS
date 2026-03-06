@@ -3,6 +3,7 @@ import { verifyAuth } from '@/lib/auth'
 import JDParser from '@/lib/jd-parser'
 
 export async function POST(request: NextRequest) {
+    console.log('[JD API] Received parse-jd request')
     try {
         const user = await verifyAuth()
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -75,10 +76,14 @@ export async function POST(request: NextRequest) {
         const data = await parser.parseJD(jdText, file.name)
 
         return NextResponse.json({ data })
-    } catch (error) {
-        console.error('JD parse error:', error)
+    } catch (error: any) {
+        console.error('JD parse error full details:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        })
         return NextResponse.json(
-            { error: 'Failed to parse job description' },
+            { error: `Failed to parse job description: ${error.message}` },
             { status: 500 }
         )
     }
