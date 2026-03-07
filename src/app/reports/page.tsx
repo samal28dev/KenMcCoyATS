@@ -29,10 +29,8 @@ export default function ReportsPage() {
         setExporting(reportKey)
         try {
             const params = new URLSearchParams({ type: reportKey })
-            if (reportKey === 'master') {
-                if (dateFrom) params.set('from', dateFrom)
-                if (dateTo) params.set('to', dateTo)
-            }
+            if (dateFrom) params.set('from', dateFrom)
+            if (dateTo) params.set('to', dateTo)
 
             const res = await apiFetch(`/api/reports/export?${params}`)
 
@@ -129,7 +127,7 @@ export default function ReportsPage() {
                         <div className="flex items-center gap-2 mb-3">
                             <CalendarRange className="h-4 w-4 text-muted-foreground" />
                             <h2 className="text-sm font-semibold">Date Range Filter</h2>
-                            <span className="text-[10px] text-muted-foreground">(applies to Master Report)</span>
+                            <span className="text-[10px] text-muted-foreground">(applies to all reports)</span>
                         </div>
                         <div className="flex items-center gap-3">
                             <div>

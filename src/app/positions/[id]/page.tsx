@@ -156,6 +156,25 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
         onError: (err: any) => toast.error(err.message),
     })
 
+    // Unassign candidate from this position
+    const unassignMutation = useMutation({
+        mutationFn: async (cpId: string) => {
+            const res = await apiFetch(`/api/candidate-positions?id=${cpId}`, {
+                method: 'DELETE',
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                throw new Error(err.error || 'Failed to unassign')
+            }
+            return res.json()
+        },
+        onSuccess: () => {
+            toast.success('Candidate removed from pipeline')
+            queryClient.invalidateQueries({ queryKey: ['position', id] })
+        },
+        onError: (err: any) => toast.error(err.message),
+    })
+
     if (!position) {
         return <AppShell><div className="flex items-center justify-center min-h-screen"><p>Loading...</p></div></AppShell>
     }
@@ -274,40 +293,61 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                                                         </p>
                                                     </div>
                                                 </Link>
-                                                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStageStyle(cp.status)}`}>
-                                                    {cp.status?.replace(/_/g, ' ')}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${getStageStyle(cp.status)}`}>
+                                                        {cp.status?.replace(/_/g, ' ')}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm(`Remove ${cp.candidateId?.name || 'this candidate'} from this position?`)) {
+                                                                unassignMutation.mutate(cp._id)
+                                                            }
+                                                        }}
+                                                        disabled={unassignMutation.isPending}
+                                                        title="Remove from pipeline"
+                                                        className="p-1 hover:bg-red-50 hover:text-red-500 rounded-md transition-colors text-muted-foreground"
+                                                    >
+                                                        <X className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             {/* Stage Buttons + Mail CV */}
-                                            <div className="flex flex-wrap items-center gap-1">
-                                                {PIPELINE_STAGES.map(stage => (
+                                            <div className="pt-3 mt-3 border-t border-border/40 flex flex-col gap-3">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] uppercase font-bold text-muted-foreground mr-1">Update Stage:</span>
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        {PIPELINE_STAGES.map(stage => (
+                                                            <button
+                                                                key={stage.value}
+                                                                onClick={() => {
+                                                                    if (stage.value !== cp.status) {
+                                                                        statusMutation.mutate({ cpId: cp._id, status: stage.value })
+                                                                    }
+                                                                }}
+                                                                disabled={statusMutation.isPending}
+                                                                className={`px-2 py-1 text-[10px] rounded-md border transition-all ${stage.value === cp.status
+                                                                    ? `${stage.color} border-transparent font-semibold shadow-sm ring-1 ring-inset ring-black/10 dark:ring-white/10`
+                                                                    : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                                                                    }`}
+                                                            >
+                                                                {stage.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-end">
                                                     <button
-                                                        key={stage.value}
-                                                        onClick={() => {
-                                                            if (stage.value !== cp.status) {
-                                                                statusMutation.mutate({ cpId: cp._id, status: stage.value })
-                                                            }
-                                                        }}
-                                                        disabled={statusMutation.isPending}
-                                                        className={`px-2 py-0.5 text-[10px] rounded-md border transition-all ${stage.value === cp.status
-                                                            ? `${stage.color} border-transparent font-semibold ring-1 ring-current`
-                                                            : 'border-border text-muted-foreground hover:bg-muted'
-                                                            }`}
+                                                        onClick={() => setMailCvCandidate({
+                                                            name: cp.candidateId?.name,
+                                                            id: cp.candidateId?._id,
+                                                            resumeFile: cp.candidateId?.resumeFile,
+                                                        })}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-primary/40 text-primary hover:bg-primary/10 transition-colors font-semibold"
                                                     >
-                                                        {stage.label}
+                                                        <Mail className="h-3.5 w-3.5" /> Mail CV to Client
                                                     </button>
-                                                ))}
-                                                <button
-                                                    onClick={() => setMailCvCandidate({
-                                                        name: cp.candidateId?.name,
-                                                        id: cp.candidateId?._id,
-                                                        resumeFile: cp.candidateId?.resumeFile,
-                                                    })}
-                                                    className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-[10px] rounded-md border border-primary/40 text-primary hover:bg-primary/10 transition-colors font-medium"
-                                                >
-                                                    <Mail className="h-3 w-3" /> Mail CV to Client
-                                                </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -466,7 +506,10 @@ export default function PositionDetailPage({ params }: { params: Promise<{ id: s
                     candidateId={mailCvCandidate.id}
                     positionId={id}
                     clientId={position.clientId?._id}
-                    resumeFile={mailCvCandidate.resumeFile}                    clientContacts={position.clientId?.contacts || []}                />
+                    resumeFile={mailCvCandidate.resumeFile}
+                    defaultAttachResume={true}
+                    clientContacts={position.clientId?.contacts || []}
+                />
             )}
         </AppShell>
     )

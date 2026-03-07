@@ -130,8 +130,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         {/* Logo */}
         <div className="relative flex h-16 items-center justify-center px-5 border-b border-border shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-kmc.jpg" alt="Ken McCoy Logo" className="h-12 w-auto object-contain" />
+          <Link href="/" onClick={() => setSidebarOpen(false)}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-kmc.jpg" alt="Ken McCoy Logo" className="h-12 w-auto object-contain cursor-pointer" />
+          </Link>
           <button
             onClick={() => setSidebarOpen(false)}
             className="absolute right-3 p-1.5 rounded-md lg:hidden hover:bg-accent"

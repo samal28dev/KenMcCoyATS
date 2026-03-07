@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
             .populate('assignedTo', 'name email')
             .lean()
 
-        // Send notifications to admins and ops heads
+        // otifications to admins and ops heads
         const admins = await User.find({
             role: { $in: ['super_admin', 'operations_head'] },
         }).select('_id').lean()

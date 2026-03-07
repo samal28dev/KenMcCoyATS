@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
 import { verifyAuth } from '@/lib/auth'
 import { getUserScope } from '@/lib/role-scope'
 import dbConnect from '@/lib/db'
@@ -30,6 +31,21 @@ export async function GET(request: NextRequest) {
         workbook.creator = 'Ken McCoy Consulting ATS'
         workbook.created = new Date()
 
+        // Extract date range params
+        const fromDate = searchParams.get('from')
+        const toDate = searchParams.get('toDate') || searchParams.get('to') // Support both 'to' and 'toDate'
+
+        let dateFilter: any = null
+        if (fromDate || toDate) {
+            dateFilter = {}
+            if (fromDate) dateFilter.$gte = new Date(fromDate)
+            if (toDate) {
+                const end = new Date(toDate)
+                end.setHours(23, 59, 59, 999) // Make inclusive of the end date
+                dateFilter.$lte = end
+            }
+        }
+
         const scope = await getUserScope(user._id.toString(), user.role, 'assignedTo')
 
         switch (type) {
@@ -52,7 +68,14 @@ export async function GET(request: NextRequest) {
                 ]
                 styleHeaderRow(ws)
 
-                const clients = await Client.find(scope.filter).populate('assignedTo', 'name').lean()
+                const filter = { ...scope.filter }
+                if (dateFilter) filter.createdAt = dateFilter
+
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
+
+                const clients = await Client.find(filter).populate('assignedTo', 'name').lean()
                 for (const c of clients as any[]) {
                     ws.addRow({
                         companyName: c.companyName,
@@ -95,6 +118,11 @@ export async function GET(request: NextRequest) {
                 const clientId = searchParams.get('clientId')
                 if (positionId) filter.positionId = positionId
                 if (clientId) filter.clientId = clientId
+                if (dateFilter) filter.createdAt = dateFilter
+
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
 
                 const candidates = await Candidate.find(filter)
                     .populate('positionId', 'title')
@@ -153,9 +181,14 @@ export async function GET(request: NextRequest) {
                 ]
                 styleHeaderRow(ws)
 
-                const pipeline = await CandidatePosition.find({
-                    status: { $in: ['offered', 'joined'] }
-                })
+                const filter: any = { status: { $in: ['offered', 'joined'] } }
+                if (dateFilter) filter.createdAt = dateFilter
+
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
+
+                const pipeline = await CandidatePosition.find(filter)
                     .populate('candidateId', 'name email phone currentCompany designation location assignedTo')
                     .populate('positionId', 'title')
                     .populate('clientId', 'companyName')
@@ -235,6 +268,11 @@ export async function GET(request: NextRequest) {
                 const pcClientId = searchParams.get('clientId')
                 const posFilter: any = {}
                 if (pcClientId) posFilter.clientId = pcClientId
+                if (dateFilter) posFilter.createdAt = dateFilter
+
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
 
                 const positions = await Position.find(posFilter)
                     .populate('clientId', 'companyName')
@@ -282,7 +320,14 @@ export async function GET(request: NextRequest) {
                 ]
                 styleHeaderRow(ws)
 
-                const clients = await Client.find(scope.filter).lean()
+                const filter = { ...scope.filter }
+                if (dateFilter) filter.createdAt = dateFilter
+
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
+
+                const clients = await Client.find(filter).lean()
                 for (const c of clients as any[]) {
                     const posCount = await Position.countDocuments({ clientId: c._id })
                     const cvCount = await CandidatePosition.countDocuments({ clientId: c._id })
@@ -308,9 +353,10 @@ export async function GET(request: NextRequest) {
                     { header: 'Period', key: 'period', width: 20 },
                 ]
                 styleHeaderRow(ws)
+                ws.insertRow(1, [`Report Generated On: ${new Date().toLocaleString()}`])
+                ws.mergeCells(1, 1, 1, 5)
+                ws.getRow(1).font = { italic: true, size: 10 }
 
-                const fromDate = searchParams.get('from')
-                const toDate = searchParams.get('to')
                 const mPeriod = searchParams.get('period') || 'monthly'
                 const mYear = parseInt(searchParams.get('year') || new Date().getFullYear().toString())
                 const mMonth = parseInt(searchParams.get('month') || (new Date().getMonth() + 1).toString())
@@ -320,6 +366,7 @@ export async function GET(request: NextRequest) {
                 if (fromDate && toDate) {
                     mStart = new Date(fromDate)
                     mEnd = new Date(toDate)
+                    mEnd.setHours(23, 59, 59, 999)
                 } else if (mPeriod === 'monthly') {
                     mStart = new Date(mYear, mMonth - 1, 1)
                     mEnd = new Date(mYear, mMonth, 1)

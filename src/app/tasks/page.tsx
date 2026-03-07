@@ -14,10 +14,11 @@ import {
     User,
     Filter,
 } from 'lucide-react'
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DateInput } from '@/components/ui/date-picker'
+import { toast } from 'sonner'
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckSquare }> = {
     new: { label: 'New', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', icon: AlertCircle },
@@ -38,6 +39,7 @@ export default function TasksPage() {
     const queryClient = useQueryClient()
     const [statusFilter, setStatusFilter] = useState('all')
     const [showCreateModal, setShowCreateModal] = useState(false)
+    const [selectedTask, setSelectedTask] = useState<any>(null)
 
     // Form state
     const [form, setForm] = useState({
@@ -98,6 +100,16 @@ export default function TasksPage() {
         })
     }
 
+    const handleMarkDone = async (task: any) => {
+        try {
+            await updateStatusMutation.mutateAsync({ id: task._id, status: 'closed' })
+            toast.success(`Done button clicked by ${user?.name || 'User'}`)
+            setSelectedTask(null)
+        } catch (error) {
+            toast.error('Failed to mark task as done')
+        }
+    }
+
     const isOverdue = (dueDate: string) => new Date(dueDate) < new Date()
 
     return (
@@ -129,8 +141,8 @@ export default function TasksPage() {
                                 key={s}
                                 onClick={() => setStatusFilter(s)}
                                 className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${statusFilter === s
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'bg-muted text-muted-foreground hover:text-foreground'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-muted text-muted-foreground hover:text-foreground'
                                     }`}
                             >
                                 {s === 'all' ? 'All' : STATUS_CONFIG[s]?.label || s}
@@ -162,7 +174,11 @@ export default function TasksPage() {
                                 const overdue = task.status !== 'closed' && isOverdue(task.dueDate)
 
                                 return (
-                                    <div key={task._id} className={`card-clean p-4 border-l-4 ${overdue ? 'border-l-red-500' : 'border-l-transparent'}`}>
+                                    <div
+                                        key={task._id}
+                                        onClick={() => setSelectedTask(task)}
+                                        className={`card-clean p-4 border-l-4 cursor-pointer hover:bg-muted/30 transition-colors ${overdue ? 'border-l-red-500' : 'border-l-transparent'}`}
+                                    >
                                         <div className="flex items-start justify-between gap-4">
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 mb-1">
@@ -198,17 +214,19 @@ export default function TasksPage() {
                                                 </div>
                                             </div>
                                             {/* Quick status change */}
-                                            <Select value={task.status} onValueChange={(val) => updateStatusMutation.mutate({ id: task._id, status: val })}>
-                                                <SelectTrigger className="w-[120px] h-8 text-xs">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="new">New</SelectItem>
-                                                    <SelectItem value="in-process">In Process</SelectItem>
-                                                    <SelectItem value="hold">Hold</SelectItem>
-                                                    <SelectItem value="closed">Closed</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                                            <div onClick={(e) => e.stopPropagation()}>
+                                                <Select value={task.status} onValueChange={(val) => updateStatusMutation.mutate({ id: task._id, status: val })}>
+                                                    <SelectTrigger className="w-[120px] h-8 text-xs">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="new">New</SelectItem>
+                                                        <SelectItem value="in-process">In Process</SelectItem>
+                                                        <SelectItem value="hold">Hold</SelectItem>
+                                                        <SelectItem value="closed">Closed</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
                                         </div>
                                     </div>
                                 )
@@ -217,6 +235,108 @@ export default function TasksPage() {
                     )}
                 </div>
             </div>
+
+            {/* Task Detail Modal */}
+            {selectedTask && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedTask(null)}>
+                    <div className="bg-background rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-6">
+                            <div className="flex items-start justify-between gap-4 mb-6">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        {(STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.new).icon && React.createElement((STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.new).icon, { className: "h-5 w-5 text-primary" })}
+                                        <h2 className="text-xl font-semibold break-words">{selectedTask.title}</h2>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${(STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.new).color}`}>
+                                            {(STATUS_CONFIG[selectedTask.status] || STATUS_CONFIG.new).label}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${(PRIORITY_CONFIG[selectedTask.priority] || PRIORITY_CONFIG.medium).color}`}>
+                                            {(PRIORITY_CONFIG[selectedTask.priority] || PRIORITY_CONFIG.medium).label}
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground uppercase">
+                                            {selectedTask.type?.replace(/_/g, ' ') || 'Custom'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedTask(null)}
+                                    className="p-2 hover:bg-muted rounded-full transition-colors"
+                                >
+                                    <Plus className="h-5 w-5 rotate-45" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 text-sm">
+                                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Due Date</p>
+                                            <p className="font-medium">
+                                                {formatDistanceToNow(new Date(selectedTask.dueDate), { addSuffix: true })}
+                                                {isOverdue(selectedTask.dueDate) && selectedTask.status !== 'closed' && (
+                                                    <span className="ml-2 text-red-500 text-xs font-bold">(Overdue)</span>
+                                                )}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-sm">
+                                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                            <User className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Assigned To</p>
+                                            <p className="font-medium">{selectedTask.assigneeId?.name || 'Unassigned'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 text-sm">
+                                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                            <Clock className="h-4 w-4 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Created</p>
+                                            <p className="font-medium text-muted-foreground">
+                                                {selectedTask.createdAt ? new Date(selectedTask.createdAt).toLocaleDateString(undefined, { dateStyle: 'long' }) : 'N/A'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Description</h3>
+                                <div className="bg-muted/30 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap min-h-[100px]">
+                                    {selectedTask.description || <span className="italic text-muted-foreground">No description provided</span>}
+                                </div>
+                            </div>
+
+                            <div className="mt-8 flex justify-end gap-3">
+                                {selectedTask.status !== 'closed' && (
+                                    <button
+                                        onClick={() => handleMarkDone(selectedTask)}
+                                        className="btn-primary px-6"
+                                        disabled={updateStatusMutation.isPending}
+                                    >
+                                        {updateStatusMutation.isPending ? 'Marking...' : 'Done'}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setSelectedTask(null)}
+                                    className="btn-secondary px-6"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Create Task Modal */}
             {showCreateModal && (

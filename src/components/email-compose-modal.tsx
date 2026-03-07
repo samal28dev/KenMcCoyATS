@@ -16,12 +16,14 @@ interface EmailComposeModalProps {
     positionId?: string
     resumeFile?: string        // candidate's resume filename
     jdFile?: string            // position's JD filename
+    defaultAttachResume?: boolean
+    defaultAttachJd?: boolean
     clientContacts?: { name?: string; email?: string }[]  // for quick-select
 }
 
 export function EmailComposeModal({
     isOpen, onClose, defaultTo, defaultSubject, candidateId, clientId, positionId,
-    resumeFile, jdFile, clientContacts
+    resumeFile, jdFile, defaultAttachResume = false, defaultAttachJd = false, clientContacts
 }: EmailComposeModalProps) {
     const [to, setTo] = useState(defaultTo || '')
     const [cc, setCc] = useState('')
@@ -33,8 +35,8 @@ export function EmailComposeModal({
     const [showCcBcc, setShowCcBcc] = useState(false)
 
     // Attachment management
-    const [attachResume, setAttachResume] = useState(false)
-    const [attachJd, setAttachJd] = useState(false)
+    const [attachResume, setAttachResume] = useState(defaultAttachResume)
+    const [attachJd, setAttachJd] = useState(defaultAttachJd)
     const [watermark, setWatermark] = useState(false)
     const [removePii, setRemovePii] = useState(false)
     const [removeCTC, setRemoveCTC] = useState(false)
@@ -43,7 +45,9 @@ export function EmailComposeModal({
     useEffect(() => {
         if (defaultTo) setTo(defaultTo)
         if (defaultSubject) setSubject(defaultSubject)
-    }, [defaultTo, defaultSubject])
+        setAttachResume(defaultAttachResume)
+        setAttachJd(defaultAttachJd)
+    }, [defaultTo, defaultSubject, defaultAttachResume, defaultAttachJd, isOpen])
 
     const { data: templates = [] } = useQuery({
         queryKey: ['email-templates'],
@@ -185,11 +189,10 @@ export function EmailComposeModal({
                                         key={i}
                                         type="button"
                                         onClick={() => setTo(c.email!)}
-                                        className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${
-                                            to === c.email
+                                        className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${to === c.email
                                                 ? 'bg-primary text-primary-foreground border-primary'
                                                 : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
-                                        }`}
+                                            }`}
                                     >
                                         {c.name ? `${c.name} <${c.email}>` : c.email}
                                     </button>
