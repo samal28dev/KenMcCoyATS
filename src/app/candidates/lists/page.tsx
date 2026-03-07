@@ -210,10 +210,13 @@ export default function CandidateListsPage() {
                                 return (
                                     <div key={list._id} className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
                                         {/* List Row */}
-                                        <div className="flex items-center gap-3 px-4 py-3.5">
+                                        <div
+                                            className={`flex items-center gap-3 px-4 py-3.5${!isEditing && !isConfirmDelete ? ' cursor-pointer select-none' : ''}`}
+                                            onClick={!isEditing && !isConfirmDelete ? () => setExpandedListId(isExpanded ? null : list._id) : undefined}
+                                        >
                                             {/* Color dot / edit swatch */}
                                             {isEditing ? (
-                                                <div className="flex gap-1 flex-wrap w-[100px]">
+                                                <div className="flex gap-1 flex-wrap w-[100px]" onClick={e => e.stopPropagation()}>
                                                     {COLOR_SWATCHES.map(c => (
                                                         <button
                                                             key={c}
@@ -234,6 +237,7 @@ export default function CandidateListsPage() {
                                                     className="flex-1 border border-border rounded-md px-2 py-1 text-[14px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                                                     value={editName}
                                                     onChange={e => setEditName(e.target.value)}
+                                                    onClick={e => e.stopPropagation()}
                                                     onKeyDown={e => {
                                                         if (e.key === 'Enter' && editName.trim()) updateMutation.mutate({ id: list._id, name: editName.trim(), color: editColor })
                                                         if (e.key === 'Escape') setEditingListId(null)
@@ -279,7 +283,8 @@ export default function CandidateListsPage() {
                                             ) : (
                                                 <div className="flex items-center gap-1">
                                                     <button
-                                                        onClick={() => {
+                                                        onClick={e => {
+                                                            e.stopPropagation()
                                                             setEditingListId(list._id)
                                                             setEditName(list.name)
                                                             setEditColor(list.color || '#3B82F6')
@@ -290,14 +295,14 @@ export default function CandidateListsPage() {
                                                         <Pencil className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => setConfirmDeleteId(list._id)}
+                                                        onClick={e => { e.stopPropagation(); setConfirmDeleteId(list._id) }}
                                                         className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                                                         title="Delete list"
                                                     >
                                                         <Trash2 className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => setExpandedListId(isExpanded ? null : list._id)}
+                                                        onClick={e => { e.stopPropagation(); setExpandedListId(isExpanded ? null : list._id) }}
                                                         className="p-1.5 rounded hover:bg-muted text-muted-foreground transition-colors"
                                                         title={isExpanded ? 'Collapse' : 'View candidates'}
                                                     >
@@ -316,7 +321,9 @@ export default function CandidateListsPage() {
                                                     <div className="py-8 text-center text-[13px] text-muted-foreground">No candidates in this list yet.</div>
                                                 ) : (
                                                     <div className="divide-y divide-border">
-                                                        {expandedList.candidates.map((c: any) => (
+                                                        {(expandedList.candidates as any[])
+                                                            .filter((c, i, arr) => arr.findIndex((x: any) => x._id === c._id) === i)
+                                                            .map((c: any) => (
                                                             <div key={c._id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
                                                                 {/* Avatar */}
                                                                 <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">

@@ -19,11 +19,26 @@ export type RoleScope = {
 
 const ADMIN_ROLES = ['super_admin', 'operations_head', 'superadmin', 'admin']
 
+/**
+ * Normalize CRM-style roles to ATS roles so the permission system works
+ * regardless of which role string is stored in the DB.
+ */
+export function normalizeRole(role: string): string {
+    const map: Record<string, string> = {
+        superadmin: 'super_admin',
+        admin: 'operations_head',
+        manager: 'team_lead',
+        staff: 'recruiter',
+    }
+    return map[role] ?? role
+}
+
 export async function getUserScope(
     userId: string,
     role: string,
     fieldName: string = 'assignedTo'  // which field to scope on
 ): Promise<RoleScope> {
+    role = normalizeRole(role)
     if (ADMIN_ROLES.includes(role)) {
         return { filter: {}, canSeeAll: true, role, userId }
     }
@@ -60,6 +75,7 @@ export function canPerformAction(
     action: 'create' | 'update' | 'delete' | 'assign' | 'view',
     entity: 'client' | 'position' | 'candidate' | 'task' | 'user'
 ): boolean {
+    userRole = normalizeRole(userRole)
     const permissions: Record<string, Record<string, string[]>> = {
         client: {
             create: ['super_admin', 'operations_head', 'team_lead'],

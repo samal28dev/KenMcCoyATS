@@ -144,7 +144,7 @@ export default function PositionsPage() {
         e.preventDefault()
         createMutation.mutate({
             title: form.title,
-            clientId: form.clientId,
+            clientId: form.clientId || undefined,
             description: form.description,
             requirements: form.requirements.split('\n').filter(r => r.trim()),
             minExperience: form.minExperience ? Number(form.minExperience) : undefined,

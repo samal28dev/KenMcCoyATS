@@ -198,7 +198,7 @@ ${formData.jd}
     }
 
     return (
-        <div className="bg-[#f3f6f9] min-h-screen">
+        <div className="bg-[#f3f6f9] dark:bg-[#0d1117] min-h-screen">
             <div className="bg-card border-b border-border shadow-sm mb-6">
                 <div className="max-w-[1000px] mx-auto flex items-center gap-2 px-4 py-3 text-[14px] text-muted-foreground">
                     <button onClick={onBack} className="flex items-center gap-1 hover:text-foreground">
@@ -445,14 +445,14 @@ ${formData.jd}
                         <div className="flex items-center gap-2">
                             <Checkbox id="email-notif" checked />
                             <Label htmlFor="email-notif" className="text-[14px] font-medium cursor-pointer flex items-center gap-2">
-                                Get responses through email as well, on every new response <span className="text-[11px] px-1.5 py-0.5 bg-green-100 text-green-700 font-bold rounded">No extra cost</span>
+                                Get responses through email as well, on every new response <span className="text-[11px] px-1.5 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 font-bold rounded">No extra cost</span>
                             </Label>
                         </div>
                         <p className="text-[12px] text-muted-foreground">Users who'll receive responses through email (max 5) <Info className="w-3 h-3 inline" /></p>
 
                         <div className="border border-border rounded-lg p-3 bg-background min-h-[100px] flex flex-wrap gap-2 items-start content-start focus-within:ring-2 focus-within:ring-primary/20 transition-all">
                             {formData.teamEmails.map((email, index) => (
-                                <Badge key={index} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 flex items-center gap-1.5 py-1 px-3 rounded-full animate-in zoom-in-95 duration-200">
+                                <Badge key={index} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800 flex items-center gap-1.5 py-1 px-3 rounded-full animate-in zoom-in-95 duration-200">
                                     {email} <X className="w-3 h-3 cursor-pointer hover:text-blue-900 transition-colors" onClick={() => removeEmail(index)} />
                                 </Badge>
                             ))}
@@ -473,21 +473,21 @@ ${formData.jd}
                     <h2 className="text-[18px] font-bold text-foreground mb-6">Candidates will be able to view your invite on their</h2>
                     <div className="flex items-center gap-12 text-muted-foreground">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-full bg-orange-50 dark:bg-orange-500/20 flex items-center justify-center">
                                 <Info className="w-5 h-5 text-orange-500" />
                             </div>
                             <span className="text-[14px] font-medium">App notification</span>
                         </div>
-                        <span className="text-border">+</span>
+                        <span className="text-muted-foreground">+</span>
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-500/20 flex items-center justify-center">
                                 <Mail className="w-5 h-5 text-blue-500" />
                             </div>
                             <span className="text-[14px] font-medium">Email</span>
                         </div>
-                        <span className="text-border">+</span>
+                        <span className="text-muted-foreground">+</span>
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-full bg-pink-50 dark:bg-pink-500/20 flex items-center justify-center">
                                 <FileText className="w-5 h-5 text-pink-500" />
                             </div>
                             <span className="text-[14px] font-medium">Naukri inbox</span>
@@ -510,7 +510,7 @@ ${formData.jd}
                             Preview
                         </Button>
                         <Button
-                            className="px-10 h-[48px] font-bold bg-zinc-950 text-white hover:bg-zinc-900 min-w-[160px] border-none"
+                            className="px-10 h-[48px] font-bold bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-100 min-w-[160px] border-none"
                             onClick={handleSend}
                             disabled={isSending}
                         >

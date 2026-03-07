@@ -127,7 +127,7 @@ export default function SettingsPage() {
   }
 
   // ---------- USER MANAGEMENT ----------
-  const isAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'operations_head'
+  const isAdmin = ['super_admin', 'superadmin', 'admin', 'operations_head'].includes(currentUser?.role ?? '')
 
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
